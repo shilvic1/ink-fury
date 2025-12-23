@@ -1,54 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ink Fury — Battle</title>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-<style>
-  body { margin:0; font-family: 'Press Start 2P', monospace; background:#111; color:#fff; overflow:hidden; }
-  
-  #menu, #gameContainer { width: 100vw; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; position: absolute; top:0; left:0; }
-  #gameContainer { display: none; background: #1a1a1a; }
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Ink Fury — Battle</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #000;
+            --border: #fff;
+            --panel: rgba(0, 0, 0, 0.9);
+        }
 
-  .logo { font-size:48px; margin-bottom:20px; text-shadow:2px 2px 0 #000; color: #0f0; }
-  .grid { display:grid; grid-template-columns:repeat(4,160px); grid-gap:16px; }
-  .card { background:#222; border:2px solid #555; border-radius:12px; padding:10px; cursor:pointer; text-align:center; transition: 0.2s; }
-  .card:hover { transform:translateY(-4px); border-color:#fff; }
-  .card.selected { border-color:#0f0; box-shadow: 0 0 15px #0f0; }
-  .card .name { font-size:12px; margin-bottom:4px; }
-  .card .role { font-size:8px; opacity:0.7; }
-  
-  #hoverInfo { position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.8); padding:15px; border-radius:10px; width:220px; font-size:10px; line-height: 1.5; border: 1px solid #444; }
-  #startBtn { margin-top:20px; padding:15px 30px; background:#0f0; color:#000; font-family: inherit; font-size:12px; border:none; border-radius:8px; cursor:pointer; opacity:0.5; }
-  #startBtn.active { opacity:1; cursor: pointer; }
+        body { margin:0; font-family: 'Press Start 2P', monospace; background:var(--bg); color:#fff; overflow:hidden; }
+        
+        /* Selection Screen */
+        #menu { 
+            width: 100vw; height: 100vh; display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; position: absolute; top:0; left:0; 
+            z-index: 10; background: #000;
+        }
 
-  canvas { background: #000; display: block; }
+        .logo { font-size:42px; margin-bottom:40px; border: 4px solid #fff; padding: 20px; }
+        .grid { display:grid; grid-template-columns:repeat(4,180px); grid-gap:15px; }
+        .card { 
+            background:#000; border:2px solid #444; padding:15px; cursor:pointer; 
+            text-align:center; transition: 0.2s; 
+        }
+        .card:hover { border-color:#fff; transform: scale(1.05); }
+        .card.selected { border-color:#fff; box-shadow: 0 0 20px rgba(255,255,255,0.4); background: #111; }
+        .card .name { font-size:12px; margin-bottom:8px; }
+        .card .role { font-size:8px; opacity:0.6; text-transform: uppercase; }
+        
+        #hoverInfo { margin-top: 30px; font-size:10px; line-height: 1.6; height: 80px; text-align: center; color: #888; }
+        #startBtn { 
+            margin-top:20px; padding:15px 40px; background:#fff; color:#000; 
+            font-family: inherit; font-size:14px; border:none; cursor:pointer; 
+            opacity:0.2; transition: 0.3s;
+        }
+        #startBtn.active { opacity:1; }
 
-  /* Ability Bar UI */
-  #ui-hud { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); text-align: center; }
-  #charNameDisplay { font-size: 18px; margin-bottom: 10px; }
-  .ability-grid { display: grid; grid-template-columns: repeat(4, 70px); grid-gap: 10px; }
-  .ability-slot { width: 70px; height: 70px; background: rgba(0,0,0,0.6); border: 2px solid #555; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 7px; position: relative; }
-  .ability-slot.ready { border-color: #0f0; }
-  .cooldown-overlay { position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0, 255, 0, 0.3); transition: height 0.1s linear; }
-  .key-hint { position: absolute; top: -15px; font-size: 10px; color: #0f0; }
+        /* Game Container */
+        #gameContainer { display: none; width: 100vw; height: 100vh; position: relative; }
+        canvas { display: block; background: #000; }
 
-  #enemy-health { position: absolute; top: 50px; left: 50%; transform: translateX(-50%); width: 300px; height: 20px; background: #333; border: 2px solid #fff; }
-  #health-fill { width: 100%; height: 100%; background: #f00; transition: width 0.2s; }
-</style>
+        /* HUD */
+        #ui-hud { 
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); 
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+        }
+        #charNameDisplay { font-size: 16px; letter-spacing: 2px; }
+        .ability-grid { display: grid; grid-template-columns: repeat(4, 85px); grid-gap: 12px; }
+        .ability-slot { 
+            width: 85px; height: 85px; background: rgba(0,0,0,0.8); border: 2px solid #333; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            font-size: 7px; position: relative; text-align: center; padding: 5px;
+        }
+        .ability-slot.ready { border-color: #fff; }
+        .cooldown-overlay { 
+            position: absolute; bottom: 0; left: 0; width: 100%; 
+            background: rgba(255, 255, 255, 0.2); height: 0%; transition: height 0.1s linear; 
+        }
+        .key-hint { position: absolute; top: -18px; font-size: 10px; color: #fff; }
+
+        #enemy-health-bar { 
+            position: absolute; top: 40px; left: 50%; transform: translateX(-50%); 
+            width: 400px; height: 10px; border: 2px solid #fff; padding: 2px;
+        }
+        #health-fill { width: 100%; height: 100%; background: #fff; transition: width 0.1s; }
+    </style>
 </head>
 <body>
 
 <div id="menu">
     <div class="logo">INK FURY</div>
     <div class="grid" id="charGrid"></div>
-    <div id="hoverInfo">Hover a character</div>
-    <button id="startBtn">Start Game</button>
+    <div id="hoverInfo">CHOOSE YOUR FIGHTER</div>
+    <button id="startBtn">ENTER ARENA</button>
 </div>
 
 <div id="gameContainer">
-    <div id="enemy-health"><div id="health-fill"></div></div>
+    <div id="enemy-health-bar"><div id="health-fill"></div></div>
     <div id="ui-hud">
         <div id="charNameDisplay">PLAYER</div>
         <div class="ability-grid" id="abilityGrid"></div>
@@ -58,47 +90,50 @@
 
 <script>
 const characters = [
-  { name:"Volt", color:"#0cf", role:"Jack of All Trades", abilities:["Dash Strike","Ink Shot","Uppercut","Ink Burst"] },
-  { name:"Flash", color:"#ff0", role:"Speed", abilities:["Quick Dash","Rapid Strike","Wall Jump","Afterimage"] },
+  { name:"Volt", color:"#0cf", role:"All-Rounder", abilities:["Dash Strike","Ink Shot","Uppercut","Ink Burst"] },
+  { name:"Flash", color:"#ff0", role:"Speedster", abilities:["Quick Dash","Rapid Strike","Wall Jump","Afterimage"] },
   { name:"Titan", color:"#f44", role:"Strength", abilities:["Power Slam","Ground Smash","Shockwave","Heavy Punch"] },
-  { name:"Shade", color:"#a0f", role:"Stealth", abilities:["Vanish","Backstab","Shadow Step","Smoke Bomb"] },
+  { name:"Shade", color:"#a0f", role:"Assassin", abilities:["Vanish","Backstab","Shadow Step","Smoke Bomb"] },
   { name:"Gadget", color:"#5f5", role:"Utility", abilities:["Trap","Barrier","Heal Pulse","Drone Strike"] },
-  { name:"Blaze", color:"#f80", role:"Magic/Elemental", abilities:["Fireball","Flame Dash","Burn AoE","Inferno"] },
-  { name:"Arrow", color:"#fff", role:"Ranged Assassin", abilities:["Snipe","Piercing Arrow","Trap Shot","Multi Shot"] },
-  { name:"Anchor", color:"#840", role:"Tank/Controller", abilities:["Shield Bash","Wall Smash","Taunt","Earthquake"] },
+  { name:"Blaze", color:"#f80", role:"Elemental", abilities:["Fireball","Flame Dash","Burn AoE","Inferno"] },
+  { name:"Arrow", color:"#fff", role:"Ranged", abilities:["Snipe","Piercing Arrow","Trap Shot","Multi Shot"] },
+  { name:"Anchor", color:"#840", role:"Heavy Tank", abilities:["Shield Bash","Wall Smash","Taunt","Earthquake"] },
 ];
 
 const charGrid = document.getElementById("charGrid");
 const hoverInfo = document.getElementById("hoverInfo");
+const startBtn = document.getElementById("startBtn");
 let selectedChar = null;
 
-characters.forEach((c)=>{
-  const card = document.createElement("div");
-  card.classList.add("card");
-  card.innerHTML = `<div class="name">${c.name}</div><div class="role">${c.role}</div>`;
-  charGrid.appendChild(card);
-  card.onmouseenter = ()=> hoverInfo.innerHTML = `<b>${c.name}</b><br>${c.role}<br><br>${c.abilities.map(a=>`• ${a}`).join("<br>")}`;
-  card.onclick = ()=>{
-    document.querySelectorAll(".card").forEach(x=>x.classList.remove("selected"));
-    card.classList.add("selected");
-    selectedChar = c;
-    document.getElementById("startBtn").classList.add("active");
-  };
+characters.forEach((c) => {
+    const card = document.createElement("div");
+    card.classList.add("card");
+    card.innerHTML = `<div class="name">${c.name}</div><div class="role">${c.role}</div>`;
+    charGrid.appendChild(card);
+    
+    card.onmouseenter = () => {
+        hoverInfo.innerHTML = `[ ${c.name} ]<br>${c.abilities.join(" • ")}`;
+    };
+    
+    card.onclick = () => {
+        document.querySelectorAll(".card").forEach(x => x.classList.remove("selected"));
+        card.classList.add("selected");
+        selectedChar = c;
+        startBtn.classList.add("active");
+    };
 });
 
-/** GAME ENGINE **/
+/** ENGINE **/
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 let gameRunning = false;
 const keys = {};
 const particles = [];
-const afterimages = [];
-const damageTexts = [];
 
 class Entity {
     constructor(x, y, color, isNPC = false) {
         this.x = x; this.y = y;
-        this.w = 40; this.h = 60;
+        this.w = 40; this.h = 70;
         this.color = color;
         this.velX = 0; this.velY = 0;
         this.facing = 1;
@@ -110,26 +145,63 @@ class Entity {
         this.attackTimer = 0;
         this.hitbox = null;
         this.isNPC = isNPC;
+        this.dead = false;
         this.cooldowns = [0, 0, 0, 0];
     }
 
     draw() {
-        if (this.hitTimer > 0) { ctx.fillStyle = "white"; this.hitTimer--; }
-        else ctx.fillStyle = this.color;
+        if (this.dead) return;
+        ctx.save();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = this.hitTimer > 0 ? "#fff" : this.color;
+        if (this.hitTimer > 0) this.hitTimer--;
+
+        // Draw Stickman
+        const cx = this.x + this.w/2;
+        const cy = this.y + 20;
         
-        ctx.fillRect(this.x, this.y, this.w, this.h);
-        
+        // Head
+        ctx.beginPath();
+        ctx.arc(cx, cy, 10, 0, Math.PI*2);
+        ctx.stroke();
+
+        // Body
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + 10);
+        ctx.lineTo(cx, cy + 35);
+        ctx.stroke();
+
+        // Arms
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + 15);
+        ctx.lineTo(cx + (this.attackTimer > 0 ? 25 * this.facing : 15 * this.facing), cy + 25);
+        ctx.moveTo(cx, cy + 15);
+        ctx.lineTo(cx - 15 * this.facing, cy + 25);
+        ctx.stroke();
+
+        // Legs
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + 35);
+        ctx.lineTo(cx - 10, cy + 50);
+        ctx.moveTo(cx, cy + 35);
+        ctx.lineTo(cx + 10, cy + 50);
+        ctx.stroke();
+
+        ctx.restore();
+
+        // Show Hitbox Visual during attack
         if (this.hitbox && this.attackTimer > 0) {
-            ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+            ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
             ctx.fillRect(this.hitbox.x, this.hitbox.y, this.hitbox.w, this.hitbox.h);
         }
     }
 
     update() {
+        if (this.dead) return;
         this.velY += 0.8; // gravity
         this.x += this.velX;
         this.y += this.velY;
-        this.velX *= 0.8;
+        this.velX *= 0.85;
 
         const ground = canvas.height - 100;
         if (this.y + this.h > ground) {
@@ -144,64 +216,83 @@ class Entity {
             this.checkCollision();
         }
 
-        this.cooldowns = this.cooldowns.map(c => Math.max(0, c - 16));
+        this.cooldowns = this.cooldowns.map(c => Math.max(0, c - 16.6));
     }
 
-    attack(dmg = 5, sizeMult = 1) {
-        this.attackTimer = 10;
+    attack(dmg, size, timer = 10) {
+        this.attackTimer = timer;
         this.hitbox = {
-            x: this.facing === 1 ? this.x + this.w : this.x - this.w,
+            x: this.facing === 1 ? this.x + this.w : this.x - (this.w * size),
             y: this.y,
-            w: this.w * sizeMult,
+            w: this.w * size,
             h: this.h,
             dmg: dmg
         };
     }
 
-    useAbility(index) {
-        if (this.cooldowns[index] > 0) return;
-        this.cooldowns[index] = 3000; // 3 second cooldown
-        this.attack(15, 1.5);
-        for(let i=0; i<10; i++) createParticle(this.x+20, this.y+30, this.color);
-    }
-
     checkCollision() {
         let target = this.isNPC ? player : npc;
+        if (target.dead) return;
         if (this.hitbox && 
             this.hitbox.x < target.x + target.w &&
             this.hitbox.x + this.hitbox.w > target.x &&
             this.hitbox.y < target.y + target.h &&
             this.hitbox.y + this.hitbox.h > target.y) {
-            
             target.takeDamage(this.hitbox.dmg, this.facing);
-            this.hitbox = null; // Single hit per attack
+            this.hitbox = null;
         }
     }
 
     takeDamage(amt, dir) {
         this.hp -= amt;
-        this.hitTimer = 5;
-        this.velX = dir * 15;
+        this.hitTimer = 8;
+        this.velX = dir * 10;
         this.velY = -5;
-        damageTexts.push({x: this.x, y: this.y - 20, text: amt, life: 30});
-        if (!this.isNPC) updateAbilityUI(); 
-        else document.getElementById('health-fill').style.width = (this.hp / this.maxHp * 100) + "%";
+        if (this.isNPC) {
+            document.getElementById('health-fill').style.width = Math.max(0, (this.hp / this.maxHp * 100)) + "%";
+            if (this.hp <= 0) this.die();
+        }
+    }
+
+    die() {
+        this.dead = true;
+        // Dramatic Ink Explosion
+        for(let i=0; i<80; i++) {
+            particles.push({
+                x: this.x + this.w/2,
+                y: this.y + this.h/2,
+                vx: (Math.random()-0.5) * 25,
+                vy: (Math.random()-0.5) * 25,
+                size: Math.random() * 15 + 5,
+                color: "#fff",
+                life: 1
+            });
+        }
     }
 }
 
 let player, npc;
 
-function createParticle(x, y, color) {
-    particles.push({x, y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, life: 1, color});
+function createSprintParticles() {
+    particles.push({
+        x: player.x + (player.facing == 1 ? 0 : player.w),
+        y: player.y + player.h - 5,
+        vx: -player.facing * (Math.random() * 5),
+        vy: -Math.random() * 2,
+        size: Math.random() * 5,
+        color: "#444",
+        life: 0.5
+    });
 }
 
-function updateAbilityUI() {
+function updateHUD() {
     const grid = document.getElementById('abilityGrid');
     grid.innerHTML = '';
     selectedChar.abilities.forEach((a, i) => {
         const slot = document.createElement('div');
-        slot.className = `ability-slot ${player.cooldowns[i] <= 0 ? 'ready' : ''}`;
-        slot.innerHTML = `<div class="key-hint">${i+1}</div><div style="padding:5px">${a}</div>`;
+        const isReady = player.cooldowns[i] <= 0;
+        slot.className = `ability-slot ${isReady ? 'ready' : ''}`;
+        slot.innerHTML = `<div class="key-hint">${i+1}</div><div style="padding:2px">${a}</div>`;
         const cd = document.createElement('div');
         cd.className = 'cooldown-overlay';
         cd.style.height = (player.cooldowns[i] / 3000 * 100) + "%";
@@ -212,72 +303,81 @@ function updateAbilityUI() {
 
 function gameLoop() {
     if (!gameRunning) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Ground
-    ctx.fillStyle = "#222";
-    ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+    // Arena Floor
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height - 100);
+    ctx.lineTo(canvas.width, canvas.height - 100);
+    ctx.stroke();
 
-    // Input
-    if (keys['a']) { player.velX -= 1; player.facing = -1; }
-    if (keys['d']) { player.velX += 1; player.facing = 1; }
-    if (keys['Shift']) { 
-        createParticle(player.x + (player.facing==1?0:40), player.y + 55, "#555");
-        player.velX += player.facing * 0.5;
-    }
+    // Player Input
+    if (keys['a']) { player.velX -= 0.8; player.facing = -1; }
+    if (keys['d']) { player.velX += 0.8; player.facing = 1; }
+    if (keys['shift']) createSprintParticles();
 
     player.update();
     npc.update();
     player.draw();
     npc.draw();
-    updateAbilityUI();
-
-    // Damage Texts
-    for (let i = damageTexts.length - 1; i >= 0; i--) {
-        let t = damageTexts[i];
-        ctx.fillStyle = `rgba(255,255,255,${t.life/30})`;
-        ctx.fillText(t.text, t.x, t.y);
-        t.y--; t.life--;
-        if(t.life <= 0) damageTexts.splice(i,1);
-    }
+    updateHUD();
 
     // Particles
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i];
+        ctx.globalAlpha = p.life;
         ctx.fillStyle = p.color;
-        ctx.fillRect(p.x, p.y, 3, 3);
+        ctx.fillRect(p.x, p.y, p.size || 3, p.size || 3);
         p.x += p.vx; p.y += p.vy; p.life -= 0.02;
         if(p.life <= 0) particles.splice(i,1);
     }
+    ctx.globalAlpha = 1;
 
     requestAnimationFrame(gameLoop);
 }
 
 window.addEventListener('keydown', e => {
-    keys[e.key.toLowerCase()] = true;
-    if (e.key === ' ' && player.jumpCount < 2) { player.velY = -16; player.jumpCount++; }
-    if (e.key === 'q') { 
-        player.velX = player.facing * 25;
-        for(let i=0; i<3; i++) afterimages.push({x: player.x, y: player.y, color: player.color, o: 0.5});
+    const key = e.key.toLowerCase();
+    keys[key] = true;
+    
+    if (key === ' ' && player.jumpCount < 2) { 
+        player.velY = -16; player.jumpCount++; 
     }
-    if (['1','2','3','4'].includes(e.key)) player.useAbility(parseInt(e.key)-1);
-    if (e.key === 'r') player.attack(10, 1.2);
+    if (key === 'q') { 
+        player.velX = player.facing * 30; 
+        for(let i=0; i<10; i++) createSprintParticles();
+    }
+    if (key === 'r') player.attack(15, 2.5, 15); // Heavy
+    if (['1','2','3','4'].includes(key)) {
+        let idx = parseInt(key)-1;
+        if (player.cooldowns[idx] <= 0) {
+            player.useAbility ? player.useAbility(idx) : player.attack(20, 3, 20);
+            player.cooldowns[idx] = 3000;
+        }
+    }
 });
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-window.onclick = () => player.attack(5, 1);
 
-document.getElementById("startBtn").onclick = ()=>{
-  if(!selectedChar) return;
-  document.getElementById('menu').style.display = 'none';
-  document.getElementById('gameContainer').style.display = 'block';
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  player = new Entity(100, 100, selectedChar.color);
-  npc = new Entity(canvas.width - 300, 100, "#666", true);
-  document.getElementById('charNameDisplay').innerText = selectedChar.name;
-  document.getElementById('charNameDisplay').style.color = selectedChar.color;
-  gameRunning = true;
-  gameLoop();
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+window.addEventListener('mousedown', () => player.attack(8, 1.5, 10)); // Light
+
+startBtn.onclick = () => {
+    if(!selectedChar) return;
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('gameContainer').style.display = 'block';
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    player = new Entity(200, 100, selectedChar.color);
+    npc = new Entity(canvas.width - 300, 100, "#666", true);
+    
+    document.getElementById('charNameDisplay').innerText = selectedChar.name;
+    document.getElementById('charNameDisplay').style.color = selectedChar.color;
+    
+    gameRunning = true;
+    gameLoop();
 };
 </script>
 </body>
