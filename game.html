@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ink Fury — Battleground</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   body { margin:0; font-family: 'Press Start 2P', monospace; background:#000; color:#fff; overflow:hidden; user-select: none; }
@@ -26,6 +27,9 @@
   
   #startBtn { margin-top:30px; padding:15px 40px; background:#fff; color:#000; font-family: inherit; font-size:14px; border:none; cursor:pointer; opacity:0.3; transition: 0.2s; }
   #startBtn.active { opacity:1; background: #0f0; box-shadow: 0 0 20px #0f0; }
+  
+  /* New Network Status UI */
+  #netStatus { margin-top: 10px; font-size: 10px; color: #0ff; text-align: center; height: 20px; }
 
   /* --- CONTROLS HUD --- */
   #controls-hud {
@@ -115,6 +119,7 @@
     <div class="logo">INK FURY</div>
     <div class="grid" id="charGrid"></div>
     <div id="hoverInfo">SELECT FIGHTER</div>
+    <div id="netStatus"></div>
     <button id="startBtn">ENTER BATTLEGROUND</button>
 </div>
 
@@ -186,12 +191,14 @@ const CHARACTERS = [
 // --- MENU LOGIC ---
 const charGrid = document.getElementById("charGrid");
 const hoverInfo = document.getElementById("hoverInfo");
+const netStatus = document.getElementById("netStatus");
 let selectedChar = null;
 
-CHARACTERS.forEach((c)=>{
+CHARACTERS.forEach((c, idx)=>{
   const card = document.createElement("div");
   card.classList.add("card");
   card.innerHTML = `<div class="name">${c.name}</div><div class="role">${c.role}</div>`;
+  card.dataset.index = idx; // Store index for network syncing
   charGrid.appendChild(card);
   
   card.onmouseenter = () => {
@@ -206,9 +213,13 @@ CHARACTERS.forEach((c)=>{
   };
 
   card.onclick = ()=>{
+    // If we have already locked in (waiting for player), disable changing
+    if(isMultiplayer && imReady) return;
+
     document.querySelectorAll(".card").forEach(x=>x.classList.remove("selected"));
     card.classList.add("selected");
     selectedChar = c;
+    selectedCharIndex = idx;
     document.getElementById("startBtn").classList.add("active");
   };
 });
@@ -230,7 +241,7 @@ let screenShake = 0;
 let matchActive = false; // Prevents moving during countdown
 
 // Input State
-const keys = { w:false, a:false, s:false, d:false, shift:false, " ":false };
+const keys = { w:false, a:false, s:false, d:false, shift:false, " ":false, q:false, e:false, r:false, 1:false, 2:false, 3:false, 4:false };
 const mouse = { x:0, y:0, down:false };
 
 // Physics Constants (Way Smaller Jump)
@@ -238,6 +249,24 @@ const GRAVITY = 0.9; // Higher gravity for snappiness
 const FRICTION = 0.88; 
 const JUMP_FORCE = -9.5; // Very small "short hop"
 const MOVE_SPEED = 0.8; 
+
+// --- NETWORK VARIABLES (Added) ---
+const urlParams = new URLSearchParams(window.location.search);
+const gameMode = urlParams.get('mode') || 'vsai'; 
+const roomID = urlParams.get('room');
+const role = urlParams.get('role'); // host or join
+const teamMode = urlParams.get('team') || '1v1';
+const username = urlParams.get('user') || 'Player';
+
+let isMultiplayer = (gameMode === 'online');
+let peer = null;
+let conn = null;
+let imReady = false;
+let peerReady = false;
+let selectedCharIndex = 0;
+let peerCharIndex = 0; // The index of the char the opponent picked
+let peerKeys = {}; // Stores inputs received from opponent
+let peerMouse = { x:0, y:0 };
 
 // --- CLASSES ---
 
@@ -352,17 +381,18 @@ class Projectile {
 }
 
 class Entity {
-    constructor(x, y, color, isPlayer, charData) {
+    constructor(x, y, color, isPlayer, charData, isRemotePlayer = false) {
         this.x = x; this.y = y;
         this.w = 40; this.h = 70;
         this.color = color;
         this.isPlayer = isPlayer;
-        this.charData = charData; // Contains abilities
+        this.isRemotePlayer = isRemotePlayer; // New flag for multiplayer enemy
+        this.charData = charData; 
         this.maxHp = 200;
         this.hp = 200;
         
         this.vx = 0; this.vy = 0;
-        this.facing = 1; // 1 right, -1 left
+        this.facing = 1; 
         
         this.grounded = false;
         this.jumps = 0;
@@ -373,7 +403,7 @@ class Entity {
         this.rushTimer = 0;
         
         // Combat States
-        this.state = "idle"; // idle, run, jump, attack, stun, dash_attack, rush
+        this.state = "idle"; 
         this.attackTimer = 0;
         this.attackType = "light";
         
@@ -396,6 +426,11 @@ class Entity {
 
     update() {
         if (this.dead) return;
+        
+        // --- MULTIPLAYER INPUT SYNC FOR REMOTE ENEMY ---
+        if (isMultiplayer && this.isRemotePlayer && matchActive) {
+            this.handleRemoteInput();
+        }
 
         // Apply Gravity only if not Rushing
         if (this.state !== "rush") {
@@ -488,8 +523,25 @@ class Entity {
         this.hpBar.style.left = (this.x + this.w/2) + "px";
         this.hpBar.style.top = (this.y - 10) + "px";
         
-        // AI Logic
-        if (!this.isPlayer && matchActive) this.aiLogic();
+        // AI Logic - DISABLED IN MULTIPLAYER
+        if (!this.isPlayer && !this.isRemotePlayer && matchActive) this.aiLogic();
+    }
+
+    handleRemoteInput() {
+        if(this.state === "stun" || this.state === "dash_attack" || this.state === "rush") return;
+        
+        // Movement based on synced keys
+        if (peerKeys['a']) { this.vx -= MOVE_SPEED; this.facing = -1; }
+        if (peerKeys['d']) { this.vx += MOVE_SPEED; this.facing = 1; }
+        
+        if (peerKeys[' '] && this.grounded) { 
+            this.vy = JUMP_FORCE; this.grounded = false; 
+        }
+
+        // Attacks
+        // Note: We use flags sent from the peer. 
+        // Logic handled in message listener usually triggers functions directly, 
+        // but simple movement is better smoothed here.
     }
 
     aiLogic() {
@@ -547,7 +599,7 @@ class Entity {
         }
     }
 
-    performAttack(type) {
+    performAttack(type, targetMouse) {
         if (this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
 
         // Determine specific Light Attack Variations
@@ -604,9 +656,12 @@ class Entity {
             let targetX, targetY;
             
             if (this.isPlayer) {
-                // Aim at mouse
                 targetX = mouse.x;
                 targetY = mouse.y;
+            } else if (this.isRemotePlayer) {
+                // Use Synced Mouse
+                targetX = peerMouse.x;
+                targetY = peerMouse.y;
             } else {
                 // AI aims at player
                 targetX = player.x;
@@ -788,6 +843,11 @@ class Entity {
             ctx.strokeStyle = "#0ff";
             ctx.beginPath(); ctx.arc(cx, cy+20, 40, 0, Math.PI*2); ctx.stroke();
         }
+        
+        // Name Tag
+        ctx.font = "8px 'Press Start 2P'";
+        ctx.fillStyle = "#fff";
+        ctx.fillText(this.isPlayer ? "YOU" : (isMultiplayer ? "ENEMY" : "AI"), cx - 10, cy - 25);
 
         ctx.globalAlpha = 1;
     }
@@ -902,6 +962,11 @@ function gameLoop() {
         if (keys[' '] && player.grounded) { 
             player.vy = JUMP_FORCE; player.grounded = false; 
         }
+        
+        // --- MULTIPLAYER SYNC ---
+        if (isMultiplayer && conn) {
+            conn.send({ type: 'input', keys: keys, mouse: mouse });
+        }
     }
 
     // 3. Updates & Draws
@@ -984,22 +1049,26 @@ function startCountdown() {
     }, 1000);
 }
 
-// --- INITIALIZATION ---
-
-document.getElementById("startBtn").onclick = () => {
-    if(!selectedChar) return;
+function startGame(remoteCharIndex) {
     document.getElementById("menu").style.display = "none";
     document.getElementById("gameContainer").style.display = "block";
     
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    // Init Entities
+    // Init My Player
     player = new Entity(200, 200, selectedChar.color, true, selectedChar);
     
-    // Pick random enemy
-    const randChar = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
-    enemy = new Entity(canvas.width - 200, 200, "#aaa", false, randChar);
+    // Init Enemy
+    if(isMultiplayer) {
+        // Use the character the peer selected
+        const enemyChar = CHARACTERS[remoteCharIndex];
+        enemy = new Entity(canvas.width - 200, 200, enemyChar.color, false, enemyChar, true);
+    } else {
+        // VS AI: Random Enemy
+        const randChar = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
+        enemy = new Entity(canvas.width - 200, 200, "#aaa", false, randChar, false);
+    }
     
     entities = [player, enemy];
     
@@ -1018,6 +1087,31 @@ document.getElementById("startBtn").onclick = () => {
     
     startCountdown();
     gameLoop();
+}
+
+document.getElementById("startBtn").onclick = () => {
+    if(!selectedChar) return;
+    
+    if (isMultiplayer) {
+        // In multiplayer, button means "Ready"
+        imReady = true;
+        document.getElementById("startBtn").innerText = "WAITING FOR OPPONENT...";
+        document.getElementById("startBtn").style.background = "#555";
+        document.getElementById("startBtn").style.cursor = "default";
+        
+        // Send choice to peer
+        if(conn) {
+             conn.send({ type: 'selected_char', index: selectedCharIndex });
+        }
+        
+        // If peer already ready (received their packet earlier), start
+        if(peerReady) {
+            startGame(peerCharIndex);
+        }
+    } else {
+        // Single player - Immediate Start
+        startGame(0);
+    }
 };
 
 // --- EVENTS ---
@@ -1027,25 +1121,109 @@ window.addEventListener('keydown', e => {
     keys[k] = true;
     
     if (!player || player.dead || !matchActive) return;
-
-    if (k === 'q') player.performAttack("dash");
-    if (k === 'r') player.performAttack("heavy");
-    if (k === 'e') player.performAttack("rush");
+    
+    // Local Actions
+    if (k === 'q') { player.performAttack("dash"); if(isMultiplayer) conn.send({type:'action', action:'dash'}); }
+    if (k === 'r') { player.performAttack("heavy"); if(isMultiplayer) conn.send({type:'action', action:'heavy'}); }
+    if (k === 'e') { player.performAttack("rush"); if(isMultiplayer) conn.send({type:'action', action:'rush'}); }
     
     if (['1','2','3','4'].includes(k)) {
         player.useAbility(parseInt(k)-1);
+        if(isMultiplayer) conn.send({type:'ability', index:parseInt(k)-1});
     }
 });
 
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+window.addEventListener('keyup', e => {
+    keys[e.key.toLowerCase()] = false;
+});
 
 window.addEventListener('mousedown', () => {
-    if(player && !player.dead && matchActive) player.performAttack("light");
+    if(player && !player.dead && matchActive) {
+        player.performAttack("light");
+        if(isMultiplayer) conn.send({type:'action', action:'light'});
+    }
 });
 
 window.addEventListener('mousemove', e => {
     mouse.x = e.clientX; mouse.y = e.clientY;
 });
+
+// --- MULTIPLAYER LOGIC ---
+
+if (isMultiplayer) {
+    netStatus.innerText = "INITIALIZING NETWORK...";
+    
+    // Init Peer
+    if (role === 'host') {
+        peer = new Peer(roomID); // Host uses the exact Room ID
+    } else {
+        peer = new Peer(); // Joiner gets random ID
+    }
+
+    peer.on('open', (id) => {
+        console.log('My Peer ID:', id);
+        
+        if (role === 'host') {
+            netStatus.innerText = `WAITING FOR PLAYER IN ${teamMode}...`;
+            peer.on('connection', (c) => {
+                conn = c;
+                setupConnection();
+            });
+        } else {
+            // Join Logic
+            netStatus.innerText = "CONNECTING TO HOST...";
+            conn = peer.connect(roomID);
+            
+            conn.on('open', () => {
+                setupConnection();
+            });
+        }
+    });
+    
+    // If name taken or error
+    peer.on('error', (err) => {
+        netStatus.innerText = "ERROR: " + err.type;
+        alert("Connection Error. Room might be full or ID invalid.");
+    });
+}
+
+function setupConnection() {
+    netStatus.innerText = "CONNECTED! SELECT CHARACTER";
+    netStatus.style.color = "#0f0";
+    
+    conn.on('data', (data) => {
+        // 1. Character Select Handling
+        if (data.type === 'selected_char') {
+            peerCharIndex = data.index;
+            peerReady = true;
+            if (imReady) {
+                startGame(peerCharIndex);
+            } else {
+                netStatus.innerText = "OPPONENT READY! CHOOSE YOUR FIGHTER";
+            }
+        }
+        
+        // 2. Input Syncing (Movement)
+        if (data.type === 'input') {
+            peerKeys = data.keys;
+            peerMouse = data.mouse;
+        }
+        
+        // 3. Actions (Attacks/Abilities)
+        if (data.type === 'action') {
+            if(!enemy) return;
+            if(data.action === 'dash') enemy.performAttack("dash");
+            if(data.action === 'rush') enemy.performAttack("rush");
+            if(data.action === 'heavy') enemy.performAttack("heavy");
+            if(data.action === 'light') enemy.performAttack("light");
+        }
+        
+        if (data.type === 'ability') {
+            if(!enemy) return;
+            enemy.useAbility(data.index);
+        }
+    });
+}
 
 </script>
 </body>
