@@ -27,6 +27,52 @@
   #startBtn { margin-top:30px; padding:15px 40px; background:#fff; color:#000; font-family: inherit; font-size:14px; border:none; cursor:pointer; opacity:0.3; transition: 0.2s; }
   #startBtn.active { opacity:1; background: #0f0; box-shadow: 0 0 20px #0f0; }
 
+  /* --- CONTROLS HUD --- */
+  #controls-hud {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid #555;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 50;
+    pointer-events: none;
+  }
+  
+  .ctrl-row {
+    display: flex;
+    align-items: center;
+    font-size: 8px;
+    color: #ccc;
+  }
+  
+  .ctrl-key {
+    width: 20px;
+    height: 20px;
+    background: #222;
+    border: 1px solid #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+    color: #ff0;
+    font-size: 8px;
+    box-shadow: 2px 2px #000;
+    transition: 0.1s;
+  }
+  .ctrl-key.wide { width: 50px; }
+  
+  /* Cooldown Visuals for Keys */
+  .ctrl-key.cooldown {
+    border-color: #f00;
+    color: #f00;
+    background: #300;
+  }
+
   /* --- IN-GAME HUD --- */
   canvas { background: #1a1a1a; display: block; image-rendering: pixelated; }
 
@@ -74,6 +120,15 @@
 
 <div id="gameContainer">
     <div id="health-containers"></div>
+    <div id="controls-hud">
+        <div class="ctrl-row"><div class="ctrl-key">A</div><div class="ctrl-key">D</div> MOVE</div>
+        <div class="ctrl-row"><div class="ctrl-key wide">SPACE</div> JUMP</div>
+        <div class="ctrl-row"><div class="ctrl-key" id="key-q">Q</div> DASH</div>
+        <div class="ctrl-row"><div class="ctrl-key" id="key-e">E</div> RUSH</div>
+        <div class="ctrl-row"><div class="ctrl-key" id="key-r">R</div> HEAVY</div>
+        <div class="ctrl-row"><div class="ctrl-key">M1</div> ATTACK</div>
+        <div class="ctrl-row"><div class="ctrl-key">1-4</div> SKILLS</div>
+    </div>
     <div id="countdown">3</div>
     <div id="game-message">VICTORY</div>
     <div id="ui-hud">
@@ -178,11 +233,11 @@ let matchActive = false; // Prevents moving during countdown
 const keys = { w:false, a:false, s:false, d:false, shift:false, " ":false };
 const mouse = { x:0, y:0, down:false };
 
-// Physics Constants (Slowed Down)
-const GRAVITY = 0.6; // Was 0.8
-const FRICTION = 0.88; // Was 0.85 (slide more/smoother)
-const JUMP_FORCE = -14; // Was -16
-const MOVE_SPEED = 0.8; // Acceleration (Was higher)
+// Physics Constants (Way Smaller Jump)
+const GRAVITY = 0.9; // Higher gravity for snappiness
+const FRICTION = 0.88; 
+const JUMP_FORCE = -9.5; // Very small "short hop"
+const MOVE_SPEED = 0.8; 
 
 // --- CLASSES ---
 
@@ -312,13 +367,18 @@ class Entity {
         this.grounded = false;
         this.jumps = 0;
         this.isDashing = false;
+        
+        // Timers
         this.dashTimer = 0;
+        this.rushTimer = 0;
         
         // Combat States
-        this.state = "idle"; // idle, run, jump, attack, stun, dash_attack
+        this.state = "idle"; // idle, run, jump, attack, stun, dash_attack, rush
         this.attackTimer = 0;
         this.attackType = "light";
-        this.cooldowns = { heavy: 0, dash: 0, a1: 0, a2: 0, a3: 0, a4: 0 };
+        
+        // Cooldowns
+        this.cooldowns = { heavy: 0, dash: 0, rush: 0, a1: 0, a2: 0, a3: 0, a4: 0 };
         this.invulnTimer = 0;
         this.dead = false;
         
@@ -337,8 +397,11 @@ class Entity {
     update() {
         if (this.dead) return;
 
-        // Gravity & Friction
-        this.vy += GRAVITY;
+        // Apply Gravity only if not Rushing
+        if (this.state !== "rush") {
+            this.vy += GRAVITY;
+        }
+
         this.vx *= FRICTION;
         
         // Apply Velocity
@@ -356,9 +419,11 @@ class Entity {
                  this.state = "idle"; // Cancel anim on land
             }
 
-            this.vy = 0;
-            this.grounded = true;
-            this.jumps = 0;
+            if(this.state !== "rush") {
+                this.vy = 0;
+                this.grounded = true;
+                this.jumps = 0;
+            }
         } else {
             this.grounded = false;
         }
@@ -387,13 +452,33 @@ class Entity {
             this.vy = 0; // Gravity defy
             
             // Trail
-            if(this.dashTimer % 2 === 0) {
-                particles.push(new Particle(this.x, this.y, this.color, 0, 40, 10)); 
-            }
+            if(this.dashTimer % 2 === 0) particles.push(new Particle(this.x, this.y, this.color, 0, 40, 10)); 
 
             if (this.dashTimer <= 0) {
                 this.vx = 0;
                 this.performAttack("dash_finisher");
+            }
+        }
+        else if (this.state === "rush") {
+            this.rushTimer--;
+            // Trail
+            particles.push(new Particle(this.x, this.y, "#0ff", 0, 30, 10));
+            
+            // Hit detection during rush
+            const target = this.isPlayer ? enemy : player;
+            if (this.x < target.x + target.w && this.x + this.w > target.x &&
+                this.y < target.y + target.h && this.y + this.h > target.y) {
+                    // Hit!
+                    target.takeDamage(20, this.facing, 10, 20);
+                    this.state = "idle";
+                    this.vx = -this.facing * 5; // Bounce back
+                    this.vy = -5;
+                    createFireExplosion(target.x, target.y);
+            }
+
+            if (this.rushTimer <= 0) {
+                this.state = "idle";
+                this.vx = this.vx * 0.2; // Slow down
             }
         }
         
@@ -408,7 +493,7 @@ class Entity {
     }
 
     aiLogic() {
-        if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack") return;
+        if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
         
         const target = player;
         const dist = Math.abs(target.x - this.x);
@@ -416,6 +501,12 @@ class Entity {
 
         // Face player
         this.facing = (target.x - this.x) > 0 ? 1 : -1;
+
+        // AI Rush Usage
+        if (dist > 250 && Math.random() < 0.02 && this.cooldowns.rush <= 0) {
+             this.performAttack("rush");
+             return;
+        }
 
         // VOLT PLAYSTYLE (Aggressive / Combo / Aerial)
         
@@ -457,7 +548,7 @@ class Entity {
     }
 
     performAttack(type) {
-        if (this.state === "stun" || this.state === "attack" || this.state === "dash_attack") return;
+        if (this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
 
         // Determine specific Light Attack Variations
         if (type === "light") {
@@ -502,6 +593,38 @@ class Entity {
             this.state = "attack";
             this.attackTimer = 15;
             this.attackType = "dash_hit";
+        }
+        else if (type === "rush") {
+            if(this.cooldowns.rush > 0) return;
+            this.cooldowns.rush = 300; // 5 seconds
+            this.state = "rush";
+            this.rushTimer = 15;
+            
+            // Calculate Vector to Mouse
+            let targetX, targetY;
+            
+            if (this.isPlayer) {
+                // Aim at mouse
+                targetX = mouse.x;
+                targetY = mouse.y;
+            } else {
+                // AI aims at player
+                targetX = player.x;
+                targetY = player.y;
+            }
+            
+            const dx = targetX - (this.x + this.w/2);
+            const dy = targetY - (this.y + this.h/2);
+            const angle = Math.atan2(dy, dx);
+            
+            this.facing = dx > 0 ? 1 : -1;
+            
+            // Rush Velocity
+            const speed = 30;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
+            
+            texts.push(new FloatingText(this.x, this.y-40, "RUSH!", "#0ff"));
         }
     }
 
@@ -648,7 +771,12 @@ class Entity {
                  // Jab
                  ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (25*this.facing), cy+20);
             }
-        } else {
+        } 
+        else if (this.state === "rush") {
+            // Naruto run arms
+            ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (20*this.facing), cy+10);
+        }
+        else {
             // Idle arms
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (10*this.facing), cy+30);
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (10*this.facing), cy+30);
@@ -765,7 +893,7 @@ function gameLoop() {
     ctx.stroke();
 
     // 2. Input Handling (Player)
-    if (matchActive && !player.dead && player.state !== "stun" && player.state !== "dash_attack") {
+    if (matchActive && !player.dead && player.state !== "stun" && player.state !== "dash_attack" && player.state !== "rush") {
         // Move
         if (keys['a']) { player.vx -= MOVE_SPEED; player.facing = -1; }
         if (keys['d']) { player.vx += MOVE_SPEED; player.facing = 1; }
@@ -802,6 +930,7 @@ function gameLoop() {
 }
 
 function updateHUD() {
+    // Update Ability Icons
     const slots = document.getElementById("abilityGrid").children;
     for(let i=0; i<4; i++) {
         const cdVal = player.cooldowns["a"+(i+1)];
@@ -815,6 +944,22 @@ function updateHUD() {
             slotDiv.classList.add("ready");
             overlay.style.height = "0%";
         }
+    }
+    
+    // Update Control Keys Visuals (Q, E, R)
+    updateKeyVisual('key-q', player.cooldowns.dash, 'Q');
+    updateKeyVisual('key-e', player.cooldowns.rush, 'E');
+    updateKeyVisual('key-r', player.cooldowns.heavy, 'R');
+}
+
+function updateKeyVisual(id, cd, letter) {
+    const el = document.getElementById(id);
+    if(cd > 0) {
+        el.classList.add("cooldown");
+        el.innerText = Math.ceil(cd/60); // Show seconds
+    } else {
+        el.classList.remove("cooldown");
+        el.innerText = letter;
     }
 }
 
@@ -885,6 +1030,7 @@ window.addEventListener('keydown', e => {
 
     if (k === 'q') player.performAttack("dash");
     if (k === 'r') player.performAttack("heavy");
+    if (k === 'e') player.performAttack("rush");
     
     if (['1','2','3','4'].includes(k)) {
         player.useAbility(parseInt(k)-1);
