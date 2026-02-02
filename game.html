@@ -358,18 +358,29 @@ class Projectile {
 
         // Collision
         entities.forEach(e => {
+            // SYNC CHANGE: Only the owner of the projectile calculates the hit.
+            // If I didn't shoot this, I wait for the network to tell me I got hit.
+            if (isMultiplayer && this.owner.isRemotePlayer) return;
+
             if (e !== this.owner && !e.dead) {
                 if (this.x < e.x + e.w && this.x + this.w > e.x &&
                     this.y < e.y + e.h && this.y + this.h > e.y) {
-                    
-                    // In Multiplayer: Only the shooter determines the hit, OR simple collision
-                    // For fairness, better if local collision determines local damage, or host authority.
-                    // Here: We let collision happen on both ends for visual snap
                     
                     e.takeDamage(this.dmg, this.dir, 5);
                     if(this.effect === "slow") e.applyStatus("slow", 120);
                     if(this.type === "Fireball") createFireExplosion(this.x, this.y);
                     
+                    // --- SYNC SEND: TELL NETWORK WE HIT THE ENEMY ---
+                    if (isMultiplayer && conn && e.isRemotePlayer) {
+                        conn.send({
+                            type: 'hit_confirm',
+                            dmg: this.dmg,
+                            dir: this.dir,
+                            kb: 5,
+                            stun: 0
+                        });
+                    }
+
                     this.active = false;
                     for(let i=0; i<10; i++) particles.push(new Particle(this.x, this.y, this.color, 10, 5, 30));
                 }
@@ -505,14 +516,23 @@ class Entity {
             
             // Hit detection during rush
             const target = this.isPlayer ? enemy : player;
-            if (this.x < target.x + target.w && this.x + this.w > target.x &&
-                this.y < target.y + target.h && this.y + this.h > target.y) {
-                    // Hit!
-                    target.takeDamage(20, this.facing, 10, 20);
-                    this.state = "idle";
-                    this.vx = -this.facing * 5; // Bounce back
-                    this.vy = -5;
-                    createFireExplosion(target.x, target.y);
+            
+            // SYNC CHECK: Rush collision should only happen if I am the rusher
+            if (!this.isRemotePlayer) { 
+                if (this.x < target.x + target.w && this.x + this.w > target.x &&
+                    this.y < target.y + target.h && this.y + this.h > target.y) {
+                        // Hit!
+                        target.takeDamage(20, this.facing, 10, 20);
+                        this.state = "idle";
+                        this.vx = -this.facing * 5; // Bounce back
+                        this.vy = -5;
+                        createFireExplosion(target.x, target.y);
+
+                        // SYNC: Send hit
+                        if(isMultiplayer && conn) {
+                            conn.send({ type: 'hit_confirm', dmg: 20, dir: this.facing, kb: 10, stun: 20 });
+                        }
+                }
             }
 
             if (this.rushTimer <= 0) {
@@ -730,6 +750,10 @@ class Entity {
 
         const target = this.isPlayer ? enemy : player;
         
+        // SYNC CHANGE: Only check hitbox if I am hitting the enemy
+        // If I am the remote player (enemy ghost), I don't calculate hits, I wait for network.
+        if (this.isRemotePlayer) return; 
+
         const hitX = this.facing === 1 ? this.x + this.w : this.x - range;
         const hitY = this.y + yOffset;
         
@@ -739,6 +763,18 @@ class Entity {
             target.takeDamage(dmg, this.facing, kb, stun);
             target.vy = lift; // Apply vertical force
             
+            // --- SYNC SEND: WE HIT THEM ---
+            if (isMultiplayer && conn) {
+                conn.send({
+                    type: 'hit_confirm',
+                    dmg: dmg,
+                    dir: this.facing,
+                    kb: kb,
+                    stun: stun,
+                    lift: lift
+                });
+            }
+
             // Visuals
             for(let i=0; i<5; i++) particles.push(new Particle(hitX, hitY, "#fff", 5, 3, 10));
         }
@@ -903,22 +939,30 @@ function executeAbility(ent, name) {
     // AOE / MELEE SPECIALS
     else if(["Uppercut", "Heavy Punch", "Shield Bash"].includes(name)) {
         createFireExplosion(ent.x + (dir*40), ent.y);
-        const target = ent.isPlayer ? enemy : player;
-        if(Math.abs(ent.x - target.x) < 100) {
-            target.takeDamage(30, dir, 15, 40); 
-            target.vy = -18; // Launch up
+        
+        // SYNC: Only calculate AOE hits if I am the source
+        if (!ent.isRemotePlayer) {
+            const target = ent.isPlayer ? enemy : player;
+            if(Math.abs(ent.x - target.x) < 100) {
+                target.takeDamage(30, dir, 15, 40); 
+                target.vy = -18; // Launch up
+                if(isMultiplayer && conn) conn.send({type: 'hit_confirm', dmg: 30, dir: dir, kb: 15, stun: 40, lift: -18 });
+            }
         }
     }
     else if(["Ink Burst", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE"].includes(name)) {
         screenShake = 15;
         createFireExplosion(ent.x, ent.y);
-        const target = ent.isPlayer ? enemy : player;
-        const dist = Math.sqrt(Math.pow(ent.x - target.x, 2) + Math.pow(ent.y - target.y, 2));
-        
         for(let i=0; i<30; i++) particles.push(new Particle(ent.x, ent.y, ent.color, 20, 5, 40));
 
-        if(dist < 180) {
-            target.takeDamage(25, dir, 20, 20);
+        // SYNC: Only calculate AOE hits if I am the source
+        if (!ent.isRemotePlayer) {
+            const target = ent.isPlayer ? enemy : player;
+            const dist = Math.sqrt(Math.pow(ent.x - target.x, 2) + Math.pow(ent.y - target.y, 2));
+            if(dist < 180) {
+                target.takeDamage(25, dir, 20, 20);
+                if(isMultiplayer && conn) conn.send({type: 'hit_confirm', dmg: 25, dir: dir, kb: 20, stun: 20 });
+            }
         }
     }
     
@@ -931,7 +975,8 @@ function executeAbility(ent, name) {
         ent.shield = 50;
     }
     else if(name === "Taunt") {
-        enemy.vx = -enemy.vx; 
+        // Only affect local enemy if triggered by player
+        if(ent.isPlayer) enemy.vx = -enemy.vx; 
     }
     else if(name === "Afterimage") {
         particles.push(new Particle(ent.x, ent.y, ent.color, 0, 40, 60)); 
@@ -997,6 +1042,21 @@ function gameLoop() {
     updateHUD();
     ctx.restore();
     
+    // --- SYNC UPDATE: SEND POSITION ---
+    // Every 10 frames, ensure our position is accurate on the other screen
+    if (isMultiplayer && conn && matchActive && !player.dead) {
+        if (!window.frameSync) window.frameSync = 0;
+        window.frameSync++;
+        if (window.frameSync % 10 === 0) {
+            conn.send({
+                type: 'sync_pos',
+                x: player.x,
+                y: player.y,
+                hp: player.hp
+            });
+        }
+    }
+
     if(player.dead || enemy.dead) return; 
     requestAnimationFrame(gameLoop);
 }
@@ -1228,6 +1288,22 @@ function setupConnection() {
         if (data.type === 'ability') {
             if(!enemy) return;
             enemy.useAbility(data.index);
+        }
+
+        // 4. Hit Confirm (Take Damage if enemy says they hit us)
+        if (data.type === 'hit_confirm') {
+            player.takeDamage(data.dmg, data.dir, data.kb, data.stun);
+            if(data.lift) player.vy = data.lift;
+        }
+
+        // 5. Position Correction (Anti-Drift)
+        if (data.type === 'sync_pos') {
+            if (enemy && !enemy.dead) {
+                // Smoothly correct position
+                enemy.x = enemy.x * 0.8 + data.x * 0.2;
+                enemy.y = enemy.y * 0.8 + data.y * 0.2;
+                enemy.hp = data.hp;
+            }
         }
     });
 }
