@@ -362,6 +362,10 @@ class Projectile {
                 if (this.x < e.x + e.w && this.x + this.w > e.x &&
                     this.y < e.y + e.h && this.y + this.h > e.y) {
                     
+                    // In Multiplayer: Only the shooter determines the hit, OR simple collision
+                    // For fairness, better if local collision determines local damage, or host authority.
+                    // Here: We let collision happen on both ends for visual snap
+                    
                     e.takeDamage(this.dmg, this.dir, 5);
                     if(this.effect === "slow") e.applyStatus("slow", 120);
                     if(this.type === "Fireball") createFireExplosion(this.x, this.y);
@@ -628,7 +632,10 @@ class Entity {
             this.vy += 10; // Accel down
         }
         else if (type === "heavy") {
-            if (this.cooldowns.heavy > 0) return;
+            // For multiplayer sync, we might skip cooldown check on receiver side,
+            // but keeping it is fine as long as we don't desync.
+            // Better to force it if remote.
+            if (this.cooldowns.heavy > 0 && !this.isRemotePlayer) return;
             this.cooldowns.heavy = 300; 
             this.state = "attack";
             this.attackTimer = 50; // Long windup
@@ -636,7 +643,7 @@ class Entity {
             texts.push(new FloatingText(this.x, this.y-20, "CHARGING!", "#f00"));
         } 
         else if (type === "dash") {
-            if (this.cooldowns.dash > 0) return;
+            if (this.cooldowns.dash > 0 && !this.isRemotePlayer) return;
             this.cooldowns.dash = 180;
             this.state = "dash_attack";
             this.dashTimer = 10; 
@@ -647,7 +654,7 @@ class Entity {
             this.attackType = "dash_hit";
         }
         else if (type === "rush") {
-            if(this.cooldowns.rush > 0) return;
+            if(this.cooldowns.rush > 0 && !this.isRemotePlayer) return;
             this.cooldowns.rush = 300; // 5 seconds
             this.state = "rush";
             this.rushTimer = 15;
@@ -687,7 +694,7 @@ class Entity {
         if (!matchActive) return;
         if (this.state !== "idle" && this.state !== "run" && this.state !== "jump") return;
         const key = "a"+(index+1);
-        if (this.cooldowns[key] > 0) return;
+        if (this.cooldowns[key] > 0 && !this.isRemotePlayer) return;
         
         const abilityName = this.charData.abilities[index];
         this.cooldowns[key] = 240; 
