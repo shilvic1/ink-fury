@@ -437,10 +437,47 @@ class Entity {
         this.hpBar.className = "hp-bar-wrap";
         this.hpBar.innerHTML = `<div class="hp-bar-fill"></div>`;
         hpContainer.appendChild(this.hpBar);
+
+        // --- MELT VARIABLES ---
+        this.melting = false;
+        this.meltTimer = 1.0; // 1.0 = full size, 0.0 = puddle
     }
 
     update() {
         if (this.dead) return;
+        
+        // --- MELT LOGIC ---
+        if (this.melting) {
+            this.meltTimer -= 0.015; // Speed of melt
+            
+            // Spawn dripping particles
+            if(Math.random() > 0.3) {
+                particles.push(new Particle(
+                    this.x + (Math.random() * this.w * (2 - this.meltTimer)) - 10, // Random width
+                    this.y + this.h, 
+                    this.color, 
+                    2, 4, 30
+                ));
+            }
+
+            // When melt is finished, trigger the actual Game Over state
+            if (this.meltTimer <= 0) {
+                this.meltTimer = 0;
+                this.dead = true; // Now the loop stops
+                
+                // Show Victory/Defeat UI (Moved from old die function)
+                if(!this.isPlayer) {
+                     document.getElementById("game-message").innerText = "VICTORY";
+                     document.getElementById("game-message").style.display = "block";
+                } else {
+                     document.getElementById("game-message").innerText = "DEFEAT";
+                     document.getElementById("game-message").style.display = "block";
+                     document.getElementById("game-message").style.color = "#f00";
+                }
+                setTimeout(() => location.reload(), 3000);
+            }
+            return; // Skip normal physics while melting
+        }
         
         // --- MULTIPLAYER INPUT SYNC FOR REMOTE ENEMY ---
         if (isMultiplayer && this.isRemotePlayer && matchActive) {
@@ -810,24 +847,56 @@ class Entity {
     }
 
     die() {
-        this.dead = true;
+        // If already melting or dead, don't trigger again
+        if (this.dead || this.melting) return;
+
+        // Start the melt
+        this.melting = true; 
         this.hp = 0;
         this.hpBar.style.display = 'none';
-        for(let i=0; i<50; i++) particles.push(new Particle(this.x, this.y, this.color, 15, 6, 60));
         
-        if(!this.isPlayer) {
-             document.getElementById("game-message").innerText = "VICTORY";
-             document.getElementById("game-message").style.display = "block";
-        } else {
-             document.getElementById("game-message").innerText = "DEFEAT";
-             document.getElementById("game-message").style.display = "block";
-             document.getElementById("game-message").style.color = "#f00";
-        }
-        setTimeout(() => location.reload(), 3000);
+        // Initial blood/ink explosion
+        for(let i=0; i<30; i++) particles.push(new Particle(this.x, this.y, this.color, 15, 6, 60));
+        
+        // We do NOT set this.dead = true yet. 
+        // We wait for the update() function to finish the melt animation first.
     }
 
     draw(ctx) {
         if (this.invisible) ctx.globalAlpha = 0.2;
+
+        // --- MELT RENDER ---
+        if (this.melting) {
+            ctx.fillStyle = this.color;
+            
+            // Calculate squash and stretch dimensions
+            const currentH = this.h * this.meltTimer;
+            const currentW = this.w * (1 + (1 - this.meltTimer) * 2); // Gets 3x wider
+            const xOffset = (currentW - this.w) / 2;
+            const yOffset = this.h - currentH; // Keep feet on floor
+
+            // Draw the melting puddle
+            ctx.beginPath();
+            // Draw a rounded rect/oval shape for the puddle
+            ctx.ellipse(
+                this.x + this.w/2, 
+                this.y + yOffset + currentH, 
+                currentW/2, 
+                currentH, 
+                0, Math.PI, 0 // Half oval
+            );
+            ctx.fill();
+            
+            // Draw eyes sinking (optional detail)
+            if (this.meltTimer > 0.3) {
+                ctx.fillStyle = "#000";
+                ctx.fillRect(this.x + 10, this.y + yOffset + 10, 5, 5);
+                ctx.fillRect(this.x + 25, this.y + yOffset + 10, 5, 5);
+            }
+            
+            ctx.globalAlpha = 1;
+            return; // Stop drawing the normal stick figure
+        }
         
         ctx.strokeStyle = this.state === "stun" ? "#555" : this.color;
         if (this.invulnTimer > 0 && Math.floor(Date.now()/50)%2===0) ctx.strokeStyle = "transparent";
@@ -1005,7 +1074,7 @@ function gameLoop() {
     ctx.stroke();
 
     // 2. Input Handling (Player)
-    if (matchActive && !player.dead && player.state !== "stun" && player.state !== "dash_attack" && player.state !== "rush") {
+    if (matchActive && !player.dead && !player.melting && player.state !== "stun" && player.state !== "dash_attack" && player.state !== "rush") {
         // Move
         if (keys['a']) { player.vx -= MOVE_SPEED; player.facing = -1; }
         if (keys['d']) { player.vx += MOVE_SPEED; player.facing = 1; }
