@@ -343,6 +343,7 @@ class Projectile {
         if(type === "Ink Shot") { this.vx = dir * 18; this.dmg = 15; }
         else if(type === "Fireball") { this.vx = dir * 12; this.w = 30; this.h = 30; this.dmg = 20; this.color = "#f80"; }
         else if(type === "Snipe") { this.vx = dir * 30; this.w = 40; this.h = 5; this.dmg = 35; }
+        else if(type === "RapidHit") { this.vx = dir * 20; this.w = 15; this.h = 15; this.dmg = 6; this.life = 10; }
         else if(type === "Trap Shot") { this.vx = dir * 12; this.dmg = 5; this.effect = "slow"; }
         else { this.dmg = 10; }
     }
@@ -421,6 +422,7 @@ class Entity {
         this.state = "idle"; 
         this.attackTimer = 0;
         this.attackType = "light";
+        this.counterActive = false; // For Taunt Counter
         
         // Cooldowns
         this.cooldowns = { heavy: 0, dash: 0, rush: 0, a1: 0, a2: 0, a3: 0, a4: 0 };
@@ -664,6 +666,7 @@ class Entity {
         if (this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
 
         // Determine specific Light Attack Variations
+        // DOWN SLAM LOGIC: If falling (vy > 0) and not grounded, trigger slam
         if (type === "light") {
             if (!this.grounded) {
                 if (this.vy < 0) type = "uppercut";
@@ -686,7 +689,8 @@ class Entity {
             this.state = "attack";
             this.attackTimer = 25;
             this.attackType = "down_slam";
-            this.vy += 10; // Accel down
+            this.vy = 25; // FORCE DOWNWARD SLAM VELOCITY
+            texts.push(new FloatingText(this.x, this.y - 30, "SLAM!", "#f44"));
         }
         else if (type === "heavy") {
             // For multiplayer sync, we might skip cooldown check on receiver side,
@@ -774,6 +778,8 @@ class Entity {
         }
         else if (this.attackType === "down_slam") {
             dmg = 18; kb = 5; lift = 15; stun = 30; range = 45; h = 60; yOffset = 30;
+            // Additional Slam Effect
+            screenShake = 10;
         }
         else if (this.attackType === "heavy") {
             if(this.attackTimer !== 5) return; // Hit only at end
@@ -818,6 +824,22 @@ class Entity {
     }
 
     takeDamage(amount, dir, knockback, stunFrames = 0) {
+        // --- COUNTER LOGIC (TAUNT) ---
+        if (this.counterActive) {
+            texts.push(new FloatingText(this.x, this.y - 40, "COUNTER!", "#fff"));
+            this.counterActive = false; // Consume counter
+            
+            // Reflect Damage
+            if (!this.isRemotePlayer) {
+                 const attacker = this.isPlayer ? enemy : player;
+                 attacker.takeDamage(amount * 1.5, -dir, 15, 40); // Knockback attacker
+                 if(isMultiplayer && conn) {
+                     conn.send({ type: 'hit_confirm', dmg: amount*1.5, dir: -dir, kb: 15, stun: 40 });
+                 }
+            }
+            return; // Negate damage
+        }
+
         if (this.invulnTimer > 0 || this.dead || this.shield > amount) {
              if(this.shield > 0) { this.shield -= amount; texts.push(new FloatingText(this.x, this.y, "BLOCKED", "#0ff")); }
              return;
@@ -899,6 +921,10 @@ class Entity {
         }
         
         ctx.strokeStyle = this.state === "stun" ? "#555" : this.color;
+        
+        // Counter Stance Visual
+        if (this.counterActive) ctx.strokeStyle = "#fff"; 
+        
         if (this.invulnTimer > 0 && Math.floor(Date.now()/50)%2===0) ctx.strokeStyle = "transparent";
         
         ctx.lineWidth = 4;
@@ -942,6 +968,11 @@ class Entity {
         else if (this.state === "rush") {
             // Naruto run arms
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (20*this.facing), cy+10);
+        }
+        else if (this.counterActive) {
+            // Blocking pose
+            ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (15*this.facing), cy+10);
+            ctx.moveTo(cx + (15*this.facing), cy+10); ctx.lineTo(cx + (15*this.facing), cy+30);
         }
         else {
             // Idle arms
@@ -1004,6 +1035,13 @@ function executeAbility(ent, name) {
         setTimeout(()=> ent.invisible=false, 2000);
         ent.x += dir * 200; // Teleport
     }
+    else if(name === "Backstab") {
+        const target = ent.isPlayer ? enemy : player;
+        ent.x = target.x - (target.facing * 50); // Teleport behind
+        ent.y = target.y; 
+        ent.facing = target.facing; // Match direction to face their back
+        particles.push(new Particle(ent.x, ent.y, "#a0f", 0, 40, 20)); // Poof effect
+    }
     
     // AOE / MELEE SPECIALS
     else if(["Uppercut", "Heavy Punch", "Shield Bash"].includes(name)) {
@@ -1019,7 +1057,8 @@ function executeAbility(ent, name) {
             }
         }
     }
-    else if(["Ink Burst", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE"].includes(name)) {
+    // Added Wall Smash and Earthquake to AoE list
+    else if(["Ink Burst", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash"].includes(name)) {
         screenShake = 15;
         createFireExplosion(ent.x, ent.y);
         for(let i=0; i<30; i++) particles.push(new Particle(ent.x, ent.y, ent.color, 20, 5, 40));
@@ -1035,6 +1074,17 @@ function executeAbility(ent, name) {
         }
     }
     
+    // SPECIAL MECHANICS
+    else if(name === "Rapid Strike") {
+        // Fire bursts of short range mini hits
+        let count = 0;
+        let interval = setInterval(() => {
+            if(count > 4) clearInterval(interval);
+            projectiles.push(new Projectile(ent, ent.x + (ent.facing*20), ent.y + 10 + (Math.random()*20), ent.facing, "RapidHit"));
+            count++;
+        }, 80);
+    }
+    
     // UTILITY
     else if(name === "Heal Pulse") {
         ent.hp = Math.min(ent.hp + 40, ent.maxHp);
@@ -1044,8 +1094,10 @@ function executeAbility(ent, name) {
         ent.shield = 50;
     }
     else if(name === "Taunt") {
-        // Only affect local enemy if triggered by player
-        if(ent.isPlayer) enemy.vx = -enemy.vx; 
+        // Counter Stance
+        ent.counterActive = true;
+        texts.push(new FloatingText(ent.x, ent.y - 40, "COUNTER READY", "#fff"));
+        setTimeout(() => ent.counterActive = false, 1500); // 1.5s window
     }
     else if(name === "Afterimage") {
         particles.push(new Particle(ent.x, ent.y, ent.color, 0, 40, 60)); 
