@@ -131,6 +131,7 @@
         <div class="ctrl-row"><div class="ctrl-key" id="key-q">Q</div> DASH</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-e">E</div> RUSH</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-r">R</div> HEAVY</div>
+        <div class="ctrl-row"><div class="ctrl-key" id="key-f">F</div> BLOCK</div>
         <div class="ctrl-row"><div class="ctrl-key">M1</div> ATTACK</div>
         <div class="ctrl-row"><div class="ctrl-key">1-4</div> SKILLS</div>
     </div>
@@ -241,7 +242,7 @@ let screenShake = 0;
 let matchActive = false; // Prevents moving during countdown
 
 // Input State
-const keys = { w:false, a:false, s:false, d:false, shift:false, " ":false, q:false, e:false, r:false, 1:false, 2:false, 3:false, 4:false };
+const keys = { w:false, a:false, s:false, d:false, f:false, shift:false, " ":false, q:false, e:false, r:false, 1:false, 2:false, 3:false, 4:false };
 const mouse = { x:0, y:0, down:false };
 
 // Physics Constants (Way Smaller Jump)
@@ -425,14 +426,14 @@ class Entity {
         this.counterActive = false; // For Taunt Counter
         
         // Cooldowns
-        this.cooldowns = { heavy: 0, dash: 0, rush: 0, a1: 0, a2: 0, a3: 0, a4: 0 };
+        this.cooldowns = { heavy: 0, dash: 0, rush: 0, a1: 0, a2: 0, a3: 0, a4: 0, block: 0 };
         this.invulnTimer = 0;
         this.dead = false;
         
         // Status
         this.invisible = false;
-        this.shield = 0;
         this.speedMod = 1;
+        this.shield = 0; // Shield restored
         
         // Create HP Bar element
         this.hpBar = document.createElement('div');
@@ -530,6 +531,11 @@ class Entity {
             this.attackTimer--;
             if (this.attackTimer <= 0) this.state = "idle";
         } 
+        else if (this.state === "blocking") {
+            this.attackTimer--;
+            this.vx *= 0.8; // Slow down while blocking
+            if (this.attackTimer <= 0) this.state = "idle";
+        }
         else if (this.state === "attack") {
             this.attackTimer--;
             if (this.attackTimer === 5 || this.attackTimer === 35 || this.attackTimer === 2) this.spawnHitbox(); 
@@ -591,7 +597,7 @@ class Entity {
     }
 
     handleRemoteInput() {
-        if(this.state === "stun" || this.state === "dash_attack" || this.state === "rush") return;
+        if(this.state === "stun" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
         
         // Movement based on synced keys
         if (peerKeys['a']) { this.vx -= MOVE_SPEED; this.facing = -1; }
@@ -600,15 +606,10 @@ class Entity {
         if (peerKeys[' '] && this.grounded) { 
             this.vy = JUMP_FORCE; this.grounded = false; 
         }
-
-        // Attacks
-        // Note: We use flags sent from the peer. 
-        // Logic handled in message listener usually triggers functions directly, 
-        // but simple movement is better smoothed here.
     }
 
     aiLogic() {
-        if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
+        if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
         
         const target = player;
         const dist = Math.abs(target.x - this.x);
@@ -640,6 +641,12 @@ class Entity {
 
         // 3. Close Range Combat
         if (dist < 70) {
+            // Chance to Block (New AI Logic)
+            if (player.state === "attack" && Math.random() < 0.3) {
+                this.performAttack("block");
+                return;
+            }
+
             // Chance to use heavy if not on cooldown
             if (this.cooldowns.heavy <= 0 && Math.random() < 0.05) {
                 this.performAttack("heavy");
@@ -691,6 +698,12 @@ class Entity {
             this.attackType = "down_slam";
             this.vy = 25; // FORCE DOWNWARD SLAM VELOCITY
             texts.push(new FloatingText(this.x, this.y - 30, "SLAM!", "#f44"));
+        }
+        else if (type === "block") {
+            if (this.cooldowns.block > 0 && !this.isRemotePlayer) return;
+            this.state = "blocking";
+            this.attackTimer = 60; // 1 second duration
+            texts.push(new FloatingText(this.x, this.y - 30, "GUARD", "#fff"));
         }
         else if (type === "heavy") {
             // For multiplayer sync, we might skip cooldown check on receiver side,
@@ -824,6 +837,32 @@ class Entity {
     }
 
     takeDamage(amount, dir, knockback, stunFrames = 0) {
+        // --- BLOCK / PARRY LOGIC ---
+        if (this.state === "blocking") {
+            // Block Successful
+            this.state = "idle"; // Block breaks
+            this.cooldowns.block = 300; // Cooldown begins (5 seconds)
+            
+            texts.push(new FloatingText(this.x, this.y - 40, "PARRY!", "#fff"));
+            
+            // Stun the attacker for 1.75 seconds (105 frames)
+            if (!this.isRemotePlayer) {
+                 const attacker = this.isPlayer ? enemy : player;
+                 // Apply stun to local reference of attacker
+                 attacker.applyStun(105); 
+                 
+                 // If multiplayer, tell the other player they got stunned
+                 if(isMultiplayer && conn) {
+                     conn.send({ type: 'parry_hit', duration: 105 });
+                 }
+            }
+            
+            // Visual for block
+            for(let i=0; i<10; i++) particles.push(new Particle(this.x+this.w/2, this.y+20, "#fff", 8, 4, 20));
+            screenShake = 10;
+            return; // Damage Canceled
+        }
+
         // --- COUNTER LOGIC (TAUNT) ---
         if (this.counterActive) {
             texts.push(new FloatingText(this.x, this.y - 40, "COUNTER!", "#fff"));
@@ -840,9 +879,22 @@ class Entity {
             return; // Negate damage
         }
 
-        if (this.invulnTimer > 0 || this.dead || this.shield > amount) {
-             if(this.shield > 0) { this.shield -= amount; texts.push(new FloatingText(this.x, this.y, "BLOCKED", "#0ff")); }
+        if (this.invulnTimer > 0 || this.dead) {
              return;
+        }
+
+        // --- SHIELD ABSORPTION LOGIC (Restored) ---
+        if (this.shield > 0) {
+            if (this.shield >= amount) {
+                this.shield -= amount;
+                texts.push(new FloatingText(this.x, this.y, "BLOCKED", "#0ff"));
+                return; // Fully absorbed
+            } else {
+                amount -= this.shield;
+                this.shield = 0;
+                texts.push(new FloatingText(this.x, this.y, "SHIELD BREAK", "#0ff"));
+                // Continue to take remaining damage
+            }
         }
 
         this.hp -= amount;
@@ -851,8 +903,7 @@ class Entity {
         
         // Stagger/Stun
         if (stunFrames > 0) {
-            this.state = "stun";
-            this.attackTimer = stunFrames; 
+            this.applyStun(stunFrames);
         }
         
         screenShake = 5;
@@ -862,6 +913,11 @@ class Entity {
         if (this.hp <= 0) {
             this.die();
         }
+    }
+    
+    applyStun(duration) {
+        this.state = "stun";
+        this.attackTimer = duration;
     }
     
     applyStatus(type, duration) {
@@ -922,7 +978,7 @@ class Entity {
         
         ctx.strokeStyle = this.state === "stun" ? "#555" : this.color;
         
-        // Counter Stance Visual
+        // Counter/Block Visuals
         if (this.counterActive) ctx.strokeStyle = "#fff"; 
         
         if (this.invulnTimer > 0 && Math.floor(Date.now()/50)%2===0) ctx.strokeStyle = "transparent";
@@ -974,6 +1030,11 @@ class Entity {
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (15*this.facing), cy+10);
             ctx.moveTo(cx + (15*this.facing), cy+10); ctx.lineTo(cx + (15*this.facing), cy+30);
         }
+        else if (this.state === "blocking") {
+            // New Block Stance: Arms towards face
+            ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (10*this.facing), cy+5); // Hand up near face
+            ctx.moveTo(cx, cy+25); ctx.lineTo(cx + (10*this.facing), cy+10); // Other hand up near face
+        }
         else {
             // Idle arms
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (10*this.facing), cy+30);
@@ -982,6 +1043,7 @@ class Entity {
         
         ctx.stroke();
 
+        // --- SHIELD RENDER RESTORED ---
         if (this.shield > 0) {
             ctx.strokeStyle = "#0ff";
             ctx.beginPath(); ctx.arc(cx, cy+20, 40, 0, Math.PI*2); ctx.stroke();
@@ -1091,7 +1153,9 @@ function executeAbility(ent, name) {
         texts.push(new FloatingText(ent.x, ent.y, "+40 HP", "#0f0"));
     }
     else if(name === "Barrier") {
+        // Restored Shield Logic
         ent.shield = 50;
+        texts.push(new FloatingText(ent.x, ent.y, "BARRIER UP", "#0ff"));
     }
     else if(name === "Taunt") {
         // Counter Stance
@@ -1199,10 +1263,11 @@ function updateHUD() {
         }
     }
     
-    // Update Control Keys Visuals (Q, E, R)
+    // Update Control Keys Visuals (Q, E, R, F)
     updateKeyVisual('key-q', player.cooldowns.dash, 'Q');
     updateKeyVisual('key-e', player.cooldowns.rush, 'E');
     updateKeyVisual('key-r', player.cooldowns.heavy, 'R');
+    updateKeyVisual('key-f', player.cooldowns.block, 'F');
 }
 
 function updateKeyVisual(id, cd, letter) {
@@ -1314,6 +1379,7 @@ window.addEventListener('keydown', e => {
     if (k === 'q') { player.performAttack("dash"); if(isMultiplayer) conn.send({type:'action', action:'dash'}); }
     if (k === 'r') { player.performAttack("heavy"); if(isMultiplayer) conn.send({type:'action', action:'heavy'}); }
     if (k === 'e') { player.performAttack("rush"); if(isMultiplayer) conn.send({type:'action', action:'rush'}); }
+    if (k === 'f') { player.performAttack("block"); if(isMultiplayer) conn.send({type:'action', action:'block'}); }
     
     if (['1','2','3','4'].includes(k)) {
         player.useAbility(parseInt(k)-1);
@@ -1404,6 +1470,7 @@ function setupConnection() {
             if(data.action === 'rush') enemy.performAttack("rush");
             if(data.action === 'heavy') enemy.performAttack("heavy");
             if(data.action === 'light') enemy.performAttack("light");
+            if(data.action === 'block') enemy.performAttack("block");
         }
         
         if (data.type === 'ability') {
@@ -1417,7 +1484,13 @@ function setupConnection() {
             if(data.lift) player.vy = data.lift;
         }
 
-        // 5. Position Correction (Anti-Drift)
+        // 5. Parry Confirm (We got parried/blocked and should be stunned)
+        if (data.type === 'parry_hit') {
+            player.applyStun(data.duration);
+            texts.push(new FloatingText(player.x, player.y - 40, "PARRIED!", "#f00"));
+        }
+
+        // 6. Position Correction (Anti-Drift)
         if (data.type === 'sync_pos') {
             if (enemy && !enemy.dead) {
                 // Smoothly correct position
