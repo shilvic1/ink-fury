@@ -1338,7 +1338,8 @@ function gameLoop() {
     if (isMultiplayer && conn && matchActive && !player.dead) {
         if (!window.frameSync) window.frameSync = 0;
         window.frameSync++;
-        if (window.frameSync % 10 === 0) {
+        // INCREASED SYNC RATE: Send pos every 2 frames for 60fps smoothness
+        if (window.frameSync % 2 === 0) { 
             conn.send({
                 type: 'sync_pos',
                 x: player.x,
@@ -1425,7 +1426,7 @@ function resetToMenu() {
     
     selectedChar = null;
     imReady = false;
-    peerReady = false;
+    peerReady = false; // Reset peer status strictly
     
     const startBtn = document.getElementById("startBtn");
     startBtn.classList.remove("active");
@@ -1529,8 +1530,11 @@ document.getElementById("startBtn").onclick = () => {
              conn.send({ type: 'selected_char', index: selectedCharIndex });
         }
         
+        // Wait logic: Only start if peer is ALREADY ready, otherwise wait for event
         if(peerReady) {
             startGame(peerCharIndex);
+        } else {
+             netStatus.innerText = "WAITING FOR OPPONENT TO SELECT...";
         }
     } else {
         startGame(0);
@@ -1691,9 +1695,9 @@ function setupConnection() {
 
         if (data.type === 'sync_pos') {
             if (enemy && !enemy.dead) {
-                // Smooth linear interpolation for position
-                enemy.x = enemy.x * 0.8 + data.x * 0.2;
-                enemy.y = enemy.y * 0.8 + data.y * 0.2;
+                // Better interpolation for smoothness (60% current, 40% new)
+                enemy.x = enemy.x * 0.6 + data.x * 0.4;
+                enemy.y = enemy.y * 0.6 + data.y * 0.4;
                 enemy.hp = data.hp;
             }
         }
