@@ -18,6 +18,11 @@
   .card { background:#111; border:2px solid #444; padding:10px; cursor:pointer; text-align:center; transition: 0.2s; position: relative; }
   .card:hover { transform:translateY(-4px); border-color:#fff; }
   .card.selected { border-color:#0f0; box-shadow: 0 0 15px rgba(0,255,0,0.5); }
+  
+  /* --- NEW LOCKED STYLE --- */
+  .card.locked { opacity: 0.3; filter: grayscale(100%); pointer-events: none; border-color: #300; }
+  .card.locked::after { content: "ELIMINATED"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); color: #f00; font-size: 10px; border: 2px solid #f00; padding: 2px; background: #000; }
+
   .card .name { font-size:12px; margin-bottom:4px; color: #fff; }
   .card .role { font-size:8px; opacity:0.7; color: #aaa; }
   
@@ -83,6 +88,14 @@
   #ui-hud { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); text-align: center; width: 100%; pointer-events: none; }
   #charNameDisplay { font-size: 20px; margin-bottom: 15px; letter-spacing: 2px; text-shadow: 2px 2px #000; }
   
+  /* NEW ROUND SCORE DISPLAY */
+  #round-display { 
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); 
+    font-size: 16px; color: #fff; text-shadow: 2px 2px #000; 
+    border: 1px solid #fff; padding: 5px 15px; background: rgba(0,0,0,0.5);
+    z-index: 60; pointer-events: none;
+  }
+
   .ability-grid { display: flex; justify-content: center; gap: 15px; }
   .ability-slot { 
     width: 60px; height: 60px; background: rgba(0,0,0,0.8); border: 2px solid #555; 
@@ -124,6 +137,8 @@
 </div>
 
 <div id="gameContainer">
+    <div id="round-display">ROUND 1 | 0 - 0</div>
+    
     <div id="health-containers"></div>
     <div id="controls-hud">
         <div class="ctrl-row"><div class="ctrl-key">A</div><div class="ctrl-key">D</div> MOVE</div>
@@ -195,35 +210,58 @@ const hoverInfo = document.getElementById("hoverInfo");
 const netStatus = document.getElementById("netStatus");
 let selectedChar = null;
 
-CHARACTERS.forEach((c, idx)=>{
-  const card = document.createElement("div");
-  card.classList.add("card");
-  card.innerHTML = `<div class="name">${c.name}</div><div class="role">${c.role}</div>`;
-  card.dataset.index = idx; // Store index for network syncing
-  charGrid.appendChild(card);
-  
-  card.onmouseenter = () => {
-    hoverInfo.innerHTML = `
-      <b style="font-size:14px; color:${c.color}">${c.name}</b><br>
-      <i style="color:#aaa">${c.role}</i><br>
-      <div style="margin:10px 0; font-size:9px">${c.desc}</div>
-      <div class="ability-list">
-        ${c.abilities.map((a,i) => `<div class="ability-item"><span style="color:${c.color}">${i+1}.</span> ${a}</div>`).join("")}
-      </div>
-    `;
-  };
+// --- ROUND & SCORE STATE (NEW) ---
+let currentRound = 1;
+let myScore = 0;
+let enemyScore = 0;
+let myLockedChars = []; // Stores indices of characters I won with
 
-  card.onclick = ()=>{
-    // If we have already locked in (waiting for player), disable changing
-    if(isMultiplayer && imReady) return;
+function renderCharGrid() {
+    charGrid.innerHTML = "";
+    CHARACTERS.forEach((c, idx)=>{
+      const card = document.createElement("div");
+      card.classList.add("card");
+      
+      // Check if locked
+      if(myLockedChars.includes(idx)) {
+          card.classList.add("locked");
+      }
 
-    document.querySelectorAll(".card").forEach(x=>x.classList.remove("selected"));
-    card.classList.add("selected");
-    selectedChar = c;
-    selectedCharIndex = idx;
-    document.getElementById("startBtn").classList.add("active");
-  };
-});
+      card.innerHTML = `<div class="name">${c.name}</div><div class="role">${c.role}</div>`;
+      card.dataset.index = idx; 
+      charGrid.appendChild(card);
+      
+      card.onmouseenter = () => {
+        if(card.classList.contains("locked")) {
+             hoverInfo.innerHTML = "CHARACTER ELIMINATED (WINNER)";
+             return;
+        }
+        hoverInfo.innerHTML = `
+          <b style="font-size:14px; color:${c.color}">${c.name}</b><br>
+          <i style="color:#aaa">${c.role}</i><br>
+          <div style="margin:10px 0; font-size:9px">${c.desc}</div>
+          <div class="ability-list">
+            ${c.abilities.map((a,i) => `<div class="ability-item"><span style="color:${c.color}">${i+1}.</span> ${a}</div>`).join("")}
+          </div>
+        `;
+      };
+
+      card.onclick = ()=>{
+        if(card.classList.contains("locked")) return; // Cannot select
+        if(isMultiplayer && imReady) return;
+
+        document.querySelectorAll(".card").forEach(x=>x.classList.remove("selected"));
+        card.classList.add("selected");
+        selectedChar = c;
+        selectedCharIndex = idx;
+        document.getElementById("startBtn").classList.add("active");
+      };
+    });
+}
+
+// Initial render
+renderCharGrid();
+
 
 // --- ENGINE VARIABLES ---
 const canvas = document.getElementById('gameCanvas');
@@ -246,12 +284,12 @@ const keys = { w:false, a:false, s:false, d:false, f:false, shift:false, " ":fal
 const mouse = { x:0, y:0, down:false };
 
 // Physics Constants (Way Smaller Jump)
-const GRAVITY = 0.9; // Higher gravity for snappiness
+const GRAVITY = 0.9; 
 const FRICTION = 0.88; 
-const JUMP_FORCE = -9.5; // Very small "short hop"
+const JUMP_FORCE = -9.5; 
 const MOVE_SPEED = 0.8; 
 
-// --- NETWORK VARIABLES (Added) ---
+// --- NETWORK VARIABLES ---
 const urlParams = new URLSearchParams(window.location.search);
 const gameMode = urlParams.get('mode') || 'vsai'; 
 const roomID = urlParams.get('room');
@@ -265,8 +303,8 @@ let conn = null;
 let imReady = false;
 let peerReady = false;
 let selectedCharIndex = 0;
-let peerCharIndex = 0; // The index of the char the opponent picked
-let peerKeys = {}; // Stores inputs received from opponent
+let peerCharIndex = 0; 
+let peerKeys = {}; 
 let peerMouse = { x:0, y:0 };
 
 // --- CLASSES ---
@@ -361,7 +399,6 @@ class Projectile {
         // Collision
         entities.forEach(e => {
             // SYNC CHANGE: Only the owner of the projectile calculates the hit.
-            // If I didn't shoot this, I wait for the network to tell me I got hit.
             if (isMultiplayer && this.owner.isRemotePlayer) return;
 
             if (e !== this.owner && !e.dead) {
@@ -463,21 +500,25 @@ class Entity {
                 ));
             }
 
-            // When melt is finished, trigger the actual Game Over state
+            // When melt is finished, trigger the Round End
             if (this.meltTimer <= 0) {
                 this.meltTimer = 0;
-                this.dead = true; // Now the loop stops
+                this.dead = true; 
                 
                 // Show Victory/Defeat UI (Moved from old die function)
                 if(!this.isPlayer) {
                      document.getElementById("game-message").innerText = "VICTORY";
                      document.getElementById("game-message").style.display = "block";
+                     document.getElementById("game-message").style.color = "#0f0";
+                     // I won
+                     setTimeout(() => endRound(true), 3000);
                 } else {
                      document.getElementById("game-message").innerText = "DEFEAT";
                      document.getElementById("game-message").style.display = "block";
                      document.getElementById("game-message").style.color = "#f00";
+                     // I lost
+                     setTimeout(() => endRound(false), 3000);
                 }
-                setTimeout(() => location.reload(), 3000);
             }
             return; // Skip normal physics while melting
         }
@@ -1247,6 +1288,9 @@ function gameLoop() {
 }
 
 function updateHUD() {
+    // Update Score
+    document.getElementById("round-display").innerText = `ROUND ${currentRound} | YOU: ${myScore} - OPP: ${enemyScore}`;
+
     // Update Ability Icons
     const slots = document.getElementById("abilityGrid").children;
     for(let i=0; i<4; i++) {
@@ -1281,25 +1325,91 @@ function updateKeyVisual(id, cd, letter) {
     }
 }
 
+// --- NEW ROUND LOGIC ---
+
+function endRound(iWon) {
+    if (iWon) {
+        myScore++;
+        myLockedChars.push(selectedCharIndex); // Lock the winner
+    } else {
+        enemyScore++;
+        // Loser does not lock char
+    }
+    
+    currentRound++;
+    
+    // CHECK GAME OVER (Best of 3)
+    if (myScore >= 2 || enemyScore >= 2) {
+        const finalMsg = iWon ? "CHAMPION!" : "GAME OVER";
+        document.getElementById("game-message").innerText = finalMsg;
+        document.getElementById("game-message").style.color = iWon ? "#0f0" : "#f00";
+        setTimeout(() => location.reload(), 3000); // Full reset after match done
+    } else {
+        // NEXT ROUND
+        resetToMenu();
+    }
+}
+
+function resetToMenu() {
+    // Reset Logic
+    matchActive = false;
+    entities = [];
+    projectiles = [];
+    particles = [];
+    texts = [];
+    
+    // UI Resets
+    document.getElementById("gameContainer").style.display = "none";
+    document.getElementById("menu").style.display = "flex";
+    document.getElementById("game-message").style.display = "none";
+    document.getElementById("health-containers").innerHTML = ""; // Clear HP bars
+    
+    // Selection Reset
+    selectedChar = null;
+    imReady = false;
+    peerReady = false;
+    
+    const startBtn = document.getElementById("startBtn");
+    startBtn.classList.remove("active");
+    startBtn.innerText = "ENTER BATTLEGROUND";
+    startBtn.style.background = "#fff";
+    startBtn.style.cursor = "pointer";
+    
+    // Re-render grid to show locks
+    renderCharGrid();
+    
+    // Net status update
+    if(isMultiplayer) {
+        netStatus.innerText = `ROUND ${currentRound} - SELECT FIGHTER`;
+        netStatus.style.color = "#0ff";
+    }
+}
+
 function startCountdown() {
     matchActive = false;
     let count = 3;
-    countdownEl.style.display = "block";
-    countdownEl.innerText = count;
     
-    const interval = setInterval(() => {
-        count--;
-        if(count > 0) {
-            countdownEl.innerText = count;
-        } else if (count === 0) {
-            countdownEl.innerText = "FIGHT!";
-            countdownEl.style.color = "#f00";
-            matchActive = true;
-        } else {
-            clearInterval(interval);
-            countdownEl.style.display = "none";
-        }
-    }, 1000);
+    countdownEl.style.display = "block";
+    countdownEl.innerText = `ROUND ${currentRound}`;
+    countdownEl.style.color = "#fff";
+    
+    // Short pause to read "ROUND X", then count down
+    setTimeout(() => {
+        const interval = setInterval(() => {
+            if(count > 0) {
+                countdownEl.innerText = count;
+                countdownEl.style.color = "#ff0";
+            } else if (count === 0) {
+                countdownEl.innerText = "FIGHT!";
+                countdownEl.style.color = "#f00";
+                matchActive = true;
+            } else {
+                clearInterval(interval);
+                countdownEl.style.display = "none";
+            }
+            count--;
+        }, 1000);
+    }, 1500); // Wait 1.5s showing "ROUND X"
 }
 
 function startGame(remoteCharIndex) {
@@ -1338,6 +1448,7 @@ function startGame(remoteCharIndex) {
         abGrid.appendChild(d);
     });
     
+    updateHUD(); // Set initial score
     startCountdown();
     gameLoop();
 }
