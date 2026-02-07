@@ -143,6 +143,7 @@
     <div id="controls-hud">
         <div class="ctrl-row"><div class="ctrl-key">A</div><div class="ctrl-key">D</div> MOVE</div>
         <div class="ctrl-row"><div class="ctrl-key wide">SPACE</div> JUMP</div>
+        <div class="ctrl-row"><div class="ctrl-key">S</div> DROP</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-q">Q</div> DASH</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-e">E</div> RUSH</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-r">R</div> HEAVY</div>
@@ -210,7 +211,7 @@ const hoverInfo = document.getElementById("hoverInfo");
 const netStatus = document.getElementById("netStatus");
 let selectedChar = null;
 
-// --- ROUND & SCORE STATE (NEW) ---
+// --- ROUND & SCORE STATE ---
 let currentRound = 1;
 let myScore = 0;
 let enemyScore = 0;
@@ -274,6 +275,7 @@ let entities = [];
 let particles = [];
 let projectiles = [];
 let texts = [];
+let platforms = []; // Stores platform objects
 let player, enemy;
 let screenShake = 0;
 
@@ -283,11 +285,134 @@ let matchActive = false; // Prevents moving during countdown
 const keys = { w:false, a:false, s:false, d:false, f:false, shift:false, " ":false, q:false, e:false, r:false, 1:false, 2:false, 3:false, 4:false };
 const mouse = { x:0, y:0, down:false };
 
-// Physics Constants (Way Smaller Jump)
+// Physics Constants
 const GRAVITY = 0.9; 
 const FRICTION = 0.88; 
 const JUMP_FORCE = -9.5; 
 const MOVE_SPEED = 0.8; 
+const WALL_THICKNESS = 50; // New Wall Thickness
+
+// --- NEW BACKGROUND SYSTEM ---
+class BackgroundSystem {
+    constructor() {
+        this.themes = ["City", "Arena", "Battlefield"];
+        this.currentTheme = "City";
+        this.offset = 0;
+    }
+
+    pickRandomTheme() {
+        this.currentTheme = this.themes[Math.floor(Math.random() * this.themes.length)];
+        console.log("Selected Theme:", this.currentTheme);
+    }
+
+    update() {
+        // Slow parallax scroll
+        this.offset += 0.5;
+    }
+
+    draw(ctx, w, h) {
+        // Clear black
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, w, h);
+
+        if (this.currentTheme === "City") {
+            // -- FUTURISTIC CITY --
+            // Sky Gradient
+            let grd = ctx.createLinearGradient(0, 0, 0, h);
+            grd.addColorStop(0, "#001");
+            grd.addColorStop(1, "#204");
+            ctx.fillStyle = grd;
+            ctx.fillRect(0,0,w,h);
+
+            // Far Buildings (Slowest)
+            ctx.fillStyle = "#050510";
+            for(let i=0; i<20; i++) {
+                let bx = (i*100) - (this.offset * 0.2) % 2000;
+                let bh = 150 + Math.sin(i)*50;
+                ctx.fillRect(bx, h - 200 - bh, 60, bh + 200);
+            }
+
+            // Near Buildings (Mid speed)
+            ctx.fillStyle = "#101020";
+            for(let i=0; i<15; i++) {
+                let bx = (i*150) - (this.offset * 0.5) % 2250;
+                let bh = 100 + Math.cos(i*2)*80;
+                ctx.fillRect(bx, h - 150 - bh, 80, bh + 150);
+                
+                // Windows (Neon)
+                ctx.fillStyle = (i%3===0) ? "#0ff" : "#f0f";
+                if(Math.random()>0.9) ctx.fillRect(bx+10, h-150-bh+20, 5, 5); // Flicker
+                ctx.fillStyle = "#101020"; // reset
+            }
+        } 
+        else if (this.currentTheme === "Arena") {
+            // -- UNDERGROUND ARENA --
+            ctx.fillStyle = "#111";
+            ctx.fillRect(0,0,w,h);
+            
+            // Grime/Walls
+            ctx.strokeStyle = "#333";
+            ctx.lineWidth = 2;
+            for(let i=0; i<w; i+=50) {
+                ctx.beginPath(); 
+                ctx.moveTo(i, 0); 
+                ctx.lineTo(i, h); 
+                ctx.stroke();
+            }
+
+            // Pipes
+            ctx.fillStyle = "#222";
+            ctx.fillRect(0, 100, w, 30);
+            ctx.fillRect(0, h-150, w, 40);
+            
+            // Chains
+            ctx.strokeStyle = "#444";
+            for(let i=0; i<w; i+=120) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, h/2 + Math.sin(this.offset/20 + i)*20);
+                ctx.stroke();
+            }
+            
+            // Graffiti text
+            ctx.font = "100px Arial";
+            ctx.fillStyle = "rgba(255, 0, 0, 0.1)";
+            ctx.fillText("FIGHT", w/2 - 150 - (this.offset*0.5)%w, h/2);
+        }
+        else if (this.currentTheme === "Battlefield") {
+            // -- BATTLEFIELD --
+            // Red Sky
+            let grd = ctx.createLinearGradient(0, 0, 0, h);
+            grd.addColorStop(0, "#310");
+            grd.addColorStop(1, "#520");
+            ctx.fillStyle = grd;
+            ctx.fillRect(0,0,w,h);
+            
+            // Smoke Clouds
+            ctx.fillStyle = "rgba(0,0,0,0.3)";
+            for(let i=0; i<10; i++) {
+                let cx = (i*200) - (this.offset) % (w+400);
+                let cy = h/2 + Math.sin(i + this.offset/50)*50;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 80, 0, Math.PI*2);
+                ctx.fill();
+            }
+            
+            // Debris (Ground)
+            ctx.fillStyle = "#110";
+            ctx.beginPath();
+            ctx.moveTo(0, h-50);
+            for(let i=0; i<=w; i+=50) {
+                ctx.lineTo(i, h-50 - Math.abs(Math.sin(i)*20));
+            }
+            ctx.lineTo(w, h);
+            ctx.lineTo(0, h);
+            ctx.fill();
+        }
+    }
+}
+
+const bgSystem = new BackgroundSystem();
 
 // --- NETWORK VARIABLES ---
 const urlParams = new URLSearchParams(window.location.search);
@@ -384,40 +509,94 @@ class Projectile {
         else if(type === "Snipe") { this.vx = dir * 30; this.w = 40; this.h = 5; this.dmg = 35; }
         else if(type === "RapidHit") { this.vx = dir * 20; this.w = 15; this.h = 15; this.dmg = 6; this.life = 10; }
         else if(type === "Trap Shot") { this.vx = dir * 12; this.dmg = 5; this.effect = "slow"; }
+        else if(type === "Landmine") { 
+            this.vx = 0; this.vy = 0; this.life = 9999; this.w=30; this.h=10; this.color="#f00"; this.dmg = 40;
+            this.y = owner.y + owner.h - 10;
+        }
+        else if(type === "Drone Strike") {
+            this.vx = dir * 5; this.vy = -5; this.life = 150; this.dmg = 25; this.color="#0f0";
+        }
         else { this.dmg = 10; }
     }
     
     update() {
+        // --- HOMING LOGIC FOR DRONE ---
+        if (this.type === "Drone Strike" && this.active) {
+            const target = this.owner.isPlayer ? enemy : player;
+            if (!target.dead) {
+                const dx = (target.x + target.w/2) - this.x;
+                const dy = (target.y + target.h/2) - this.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist > 0) {
+                    this.vx += (dx / dist) * 1.5; 
+                    this.vy += (dy / dist) * 1.5;
+                    const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+                    if (speed > 12) {
+                        this.vx = (this.vx / speed) * 12;
+                        this.vy = (this.vy / speed) * 12;
+                    }
+                }
+            }
+            particles.push(new Particle(this.x, this.y, "#0f0", 0, 5, 10));
+        }
+
         this.x += this.vx;
         this.y += this.vy;
         this.life--;
         if(this.life <= 0) this.active = false;
         
         // Particles
-        if(Math.random() > 0.5) particles.push(new Particle(this.x, this.y, this.color, 5, 4, 20, this.type === "Fireball"));
+        if(Math.random() > 0.5 && this.type !== "Landmine") particles.push(new Particle(this.x, this.y, this.color, 5, 4, 20, this.type === "Fireball"));
+        
+        // Pulse Effect for Landmine
+        if(this.type === "Landmine") {
+            if(Math.floor(Date.now()/200)%2===0) this.color = "#f00"; else this.color = "#500";
+        }
 
-        // Collision
+        // --- WALL COLLISION (CANCEL PROJECTILE) ---
+        // Checks if projectile hits the left or right walls
+        if (this.type !== "Landmine") { // Mines don't move, so they don't hit walls
+            if (this.x < WALL_THICKNESS || this.x > canvas.width - WALL_THICKNESS) {
+                this.active = false;
+                // Spawn "Poof" particles at collision point
+                for(let i=0; i<8; i++) {
+                     particles.push(new Particle(this.x, this.y, "#fff", 5, 5, 15));
+                }
+                return; 
+            }
+        }
+
+        // Entity Collision
         entities.forEach(e => {
-            // SYNC CHANGE: Only the owner of the projectile calculates the hit.
             if (isMultiplayer && this.owner.isRemotePlayer) return;
-
             if (e !== this.owner && !e.dead) {
                 if (this.x < e.x + e.w && this.x + this.w > e.x &&
                     this.y < e.y + e.h && this.y + this.h > e.y) {
                     
+                    if (this.type === "Landmine") {
+                         createFireExplosion(this.x, this.y);
+                         screenShake = 20;
+                         entities.forEach(victim => {
+                             const dist = Math.sqrt(Math.pow(this.x - victim.x, 2) + Math.pow(this.y - victim.y, 2));
+                             if (dist < 100) {
+                                 victim.takeDamage(40, (victim.x > this.x ? 1 : -1), 15, 40);
+                                 victim.vy = -15; 
+                                 if(isMultiplayer && conn && victim.isRemotePlayer) {
+                                     conn.send({type: 'hit_confirm', dmg: 40, dir: (victim.x > this.x ? 1 : -1), kb: 15, stun: 40, lift: -15 });
+                                 }
+                             }
+                         });
+                         this.active = false;
+                         return;
+                    }
+
                     e.takeDamage(this.dmg, this.dir, 5);
                     if(this.effect === "slow") e.applyStatus("slow", 120);
-                    if(this.type === "Fireball") createFireExplosion(this.x, this.y);
+                    if(this.type === "Fireball" || this.type === "Drone Strike") createFireExplosion(this.x, this.y);
                     
-                    // --- SYNC SEND: TELL NETWORK WE HIT THE ENEMY ---
                     if (isMultiplayer && conn && e.isRemotePlayer) {
-                        conn.send({
-                            type: 'hit_confirm',
-                            dmg: this.dmg,
-                            dir: this.dir,
-                            kb: 5,
-                            stun: 0
-                        });
+                        conn.send({ type: 'hit_confirm', dmg: this.dmg, dir: this.dir, kb: 5, stun: 0 });
                     }
 
                     this.active = false;
@@ -430,6 +609,11 @@ class Projectile {
     draw(ctx) {
         ctx.fillStyle = this.color;
         if (this.type === "Snipe") ctx.fillRect(this.x, this.y, this.w, this.h);
+        else if (this.type === "Landmine") {
+             ctx.fillRect(this.x, this.y, this.w, this.h);
+             ctx.fillStyle = "#fff";
+             ctx.fillRect(this.x + 10, this.y - 2, 10, 4);
+        }
         else ctx.beginPath(), ctx.arc(this.x+this.w/2, this.y+this.h/2, this.w/2, 0, Math.PI*2), ctx.fill();
     }
 }
@@ -440,7 +624,7 @@ class Entity {
         this.w = 40; this.h = 70;
         this.color = color;
         this.isPlayer = isPlayer;
-        this.isRemotePlayer = isRemotePlayer; // New flag for multiplayer enemy
+        this.isRemotePlayer = isRemotePlayer; 
         this.charData = charData; 
         this.maxHp = 200;
         this.hp = 200;
@@ -460,7 +644,7 @@ class Entity {
         this.state = "idle"; 
         this.attackTimer = 0;
         this.attackType = "light";
-        this.counterActive = false; // For Taunt Counter
+        this.counterActive = false; 
         
         // Cooldowns
         this.cooldowns = { heavy: 0, dash: 0, rush: 0, a1: 0, a2: 0, a3: 0, a4: 0, block: 0 };
@@ -470,111 +654,107 @@ class Entity {
         // Status
         this.invisible = false;
         this.speedMod = 1;
-        this.shield = 0; // Shield restored
+        this.shield = 0; 
         
-        // Create HP Bar element
         this.hpBar = document.createElement('div');
         this.hpBar.className = "hp-bar-wrap";
         this.hpBar.innerHTML = `<div class="hp-bar-fill"></div>`;
         hpContainer.appendChild(this.hpBar);
 
-        // --- MELT VARIABLES ---
         this.melting = false;
-        this.meltTimer = 1.0; // 1.0 = full size, 0.0 = puddle
+        this.meltTimer = 1.0; 
     }
 
     update() {
         if (this.dead) return;
         
-        // --- MELT LOGIC ---
         if (this.melting) {
-            this.meltTimer -= 0.015; // Speed of melt
-            
-            // Spawn dripping particles
+            this.meltTimer -= 0.015; 
             if(Math.random() > 0.3) {
-                particles.push(new Particle(
-                    this.x + (Math.random() * this.w * (2 - this.meltTimer)) - 10, // Random width
-                    this.y + this.h, 
-                    this.color, 
-                    2, 4, 30
-                ));
+                particles.push(new Particle(this.x + (Math.random() * this.w * (2 - this.meltTimer)) - 10, this.y + this.h, this.color, 2, 4, 30));
             }
-
-            // When melt is finished, trigger the Round End
             if (this.meltTimer <= 0) {
                 this.meltTimer = 0;
                 this.dead = true; 
-                
-                // Show Victory/Defeat UI (Moved from old die function)
                 if(!this.isPlayer) {
                      document.getElementById("game-message").innerText = "VICTORY";
                      document.getElementById("game-message").style.display = "block";
                      document.getElementById("game-message").style.color = "#0f0";
-                     // I won
                      setTimeout(() => endRound(true), 3000);
                 } else {
                      document.getElementById("game-message").innerText = "DEFEAT";
                      document.getElementById("game-message").style.display = "block";
                      document.getElementById("game-message").style.color = "#f00";
-                     // I lost
                      setTimeout(() => endRound(false), 3000);
                 }
             }
-            return; // Skip normal physics while melting
+            return;
         }
         
-        // --- MULTIPLAYER INPUT SYNC FOR REMOTE ENEMY ---
         if (isMultiplayer && this.isRemotePlayer && matchActive) {
             this.handleRemoteInput();
         }
 
-        // Apply Gravity only if not Rushing
         if (this.state !== "rush") {
             this.vy += GRAVITY;
         }
 
         this.vx *= FRICTION;
-        
-        // Apply Velocity
         this.x += this.vx * this.speedMod;
         this.y += this.vy;
 
-        // Ground Collision
+        // --- PLATFORM COLLISION ---
+        this.grounded = false; // Assume in air first
+
+        // 1. Floor Collision
         if (this.y + this.h > canvas.height - 50) {
             this.y = canvas.height - 50 - this.h;
-            
-            // Ground Slam Impact
             if (this.state === "attack" && this.attackType === "down_slam" && this.vy > 10) {
                  screenShake = 15;
                  createFireExplosion(this.x + this.w/2, this.y + this.h);
-                 this.state = "idle"; // Cancel anim on land
+                 this.state = "idle"; 
             }
-
             if(this.state !== "rush") {
                 this.vy = 0;
                 this.grounded = true;
                 this.jumps = 0;
             }
-        } else {
-            this.grounded = false;
+        } 
+
+        // 2. Floating Platforms (One-way)
+        // Only check collision if falling down (vy >= 0) AND not holding 'S' (Drop down)
+        let dropDown = (this.isPlayer && keys['s']) || (isMultiplayer && this.isRemotePlayer && peerKeys['s']);
+
+        if (this.vy >= 0 && !dropDown) {
+            platforms.forEach(plat => {
+                // Check bounds: X overlapping platform, Y colliding with top
+                if (this.x + this.w > plat.x && this.x < plat.x + plat.w &&
+                    this.y + this.h >= plat.y && this.y + this.h <= plat.y + 25) { // 25px leeway for snap
+                    
+                    // Snap to top
+                    this.y = plat.y - this.h;
+                    this.vy = 0;
+                    this.grounded = true;
+                    this.jumps = 0;
+                }
+            });
         }
         
-        // Screen Bounds
-        if(this.x < 0) this.x = 0;
-        if(this.x > canvas.width - this.w) this.x = canvas.width - this.w;
+        // --- WALL COLLISION (Players) ---
+        // Block player from going past walls
+        if(this.x < WALL_THICKNESS) { this.x = WALL_THICKNESS; this.vx = 0; }
+        if(this.x > canvas.width - WALL_THICKNESS - this.w) { this.x = canvas.width - WALL_THICKNESS - this.w; this.vx = 0; }
 
-        // Update Timers
         this.invulnTimer--;
         for(let k in this.cooldowns) if(this.cooldowns[k] > 0) this.cooldowns[k]--;
         
-        // State Machine
         if (this.state === "stun") {
             this.attackTimer--;
             if (this.attackTimer <= 0) this.state = "idle";
         } 
         else if (this.state === "blocking") {
             this.attackTimer--;
-            this.vx *= 0.8; // Slow down while blocking
+            this.vx *= 0.8; 
             if (this.attackTimer <= 0) this.state = "idle";
         }
         else if (this.state === "attack") {
@@ -584,12 +764,9 @@ class Entity {
         }
         else if (this.state === "dash_attack") {
             this.dashTimer--;
-            this.vx = this.facing * 25; // High speed dash
-            this.vy = 0; // Gravity defy
-            
-            // Trail
+            this.vx = this.facing * 25; 
+            this.vy = 0; 
             if(this.dashTimer % 2 === 0) particles.push(new Particle(this.x, this.y, this.color, 0, 40, 10)); 
-
             if (this.dashTimer <= 0) {
                 this.vx = 0;
                 this.performAttack("dash_finisher");
@@ -597,53 +774,39 @@ class Entity {
         }
         else if (this.state === "rush") {
             this.rushTimer--;
-            // Trail
             particles.push(new Particle(this.x, this.y, "#0ff", 0, 30, 10));
-            
-            // Hit detection during rush
             const target = this.isPlayer ? enemy : player;
-            
-            // SYNC CHECK: Rush collision should only happen if I am the rusher
             if (!this.isRemotePlayer) { 
                 if (this.x < target.x + target.w && this.x + this.w > target.x &&
                     this.y < target.y + target.h && this.y + this.h > target.y) {
-                        // Hit!
                         target.takeDamage(20, this.facing, 10, 20);
                         this.state = "idle";
-                        this.vx = -this.facing * 5; // Bounce back
+                        this.vx = -this.facing * 5; 
                         this.vy = -5;
                         createFireExplosion(target.x, target.y);
-
-                        // SYNC: Send hit
                         if(isMultiplayer && conn) {
                             conn.send({ type: 'hit_confirm', dmg: 20, dir: this.facing, kb: 10, stun: 20 });
                         }
                 }
             }
-
             if (this.rushTimer <= 0) {
                 this.state = "idle";
-                this.vx = this.vx * 0.2; // Slow down
+                this.vx = this.vx * 0.2; 
             }
         }
         
-        // UI Update
         const fill = this.hpBar.querySelector('.hp-bar-fill');
         fill.style.width = (this.hp / this.maxHp * 100) + "%";
         this.hpBar.style.left = (this.x + this.w/2) + "px";
         this.hpBar.style.top = (this.y - 10) + "px";
         
-        // AI Logic - DISABLED IN MULTIPLAYER
         if (!this.isPlayer && !this.isRemotePlayer && matchActive) this.aiLogic();
     }
 
     handleRemoteInput() {
         if(this.state === "stun" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
-        
-        // Movement based on synced keys
         if (peerKeys['a']) { this.vx -= MOVE_SPEED; this.facing = -1; }
         if (peerKeys['d']) { this.vx += MOVE_SPEED; this.facing = 1; }
-        
         if (peerKeys[' '] && this.grounded) { 
             this.vy = JUMP_FORCE; this.grounded = false; 
         }
@@ -651,59 +814,43 @@ class Entity {
 
     aiLogic() {
         if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
-        
         const target = player;
         const dist = Math.abs(target.x - this.x);
         const yDist = target.y - this.y;
-
-        // Face player
         this.facing = (target.x - this.x) > 0 ? 1 : -1;
 
-        // AI Rush Usage
         if (dist > 250 && Math.random() < 0.02 && this.cooldowns.rush <= 0) {
              this.performAttack("rush");
              return;
         }
 
-        // VOLT PLAYSTYLE (Aggressive / Combo / Aerial)
-        
-        // 1. If opponent is in the air above me -> Jump & Uppercut
         if (yDist < -50 && dist < 50 && this.grounded) {
              this.vy = JUMP_FORCE;
-             setTimeout(() => this.performAttack("light"), 100); // Trigger uppercut mid-air
+             setTimeout(() => this.performAttack("light"), 100); 
              return;
         }
 
-        // 2. Dash to close distance
         if (dist > 200 && this.cooldowns.dash <= 0) {
             this.performAttack("dash");
             return;
         }
 
-        // 3. Close Range Combat
         if (dist < 70) {
-            // Chance to Block (New AI Logic)
             if (player.state === "attack" && Math.random() < 0.3) {
                 this.performAttack("block");
                 return;
             }
-
-            // Chance to use heavy if not on cooldown
             if (this.cooldowns.heavy <= 0 && Math.random() < 0.05) {
                 this.performAttack("heavy");
             } 
-            // Standard combo mixing
             else if (Math.random() < 0.1) {
                 this.performAttack("light");
             }
         } else {
-            // Chase
             this.vx += this.facing * MOVE_SPEED;
-            // Jump over player or obstacles
             if (this.grounded && Math.random() < 0.02) this.vy = JUMP_FORCE;
         }
         
-        // 4. Random Ability Usage
         if (Math.random() < 0.01) {
             const r = Math.floor(Math.random()*4);
             this.useAbility(r);
@@ -713,8 +860,6 @@ class Entity {
     performAttack(type, targetMouse) {
         if (this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush") return;
 
-        // Determine specific Light Attack Variations
-        // DOWN SLAM LOGIC: If falling (vy > 0) and not grounded, trigger slam
         if (type === "light") {
             if (!this.grounded) {
                 if (this.vy < 0) type = "uppercut";
@@ -724,7 +869,7 @@ class Entity {
 
         if (type === "light") {
             this.state = "attack";
-            this.attackTimer = 20; // Slower
+            this.attackTimer = 20; 
             this.attackType = "light";
         }
         else if (type === "uppercut") {
@@ -737,23 +882,20 @@ class Entity {
             this.state = "attack";
             this.attackTimer = 25;
             this.attackType = "down_slam";
-            this.vy = 25; // FORCE DOWNWARD SLAM VELOCITY
+            this.vy = 25; 
             texts.push(new FloatingText(this.x, this.y - 30, "SLAM!", "#f44"));
         }
         else if (type === "block") {
             if (this.cooldowns.block > 0 && !this.isRemotePlayer) return;
             this.state = "blocking";
-            this.attackTimer = 60; // 1 second duration
+            this.attackTimer = 60; 
             texts.push(new FloatingText(this.x, this.y - 30, "GUARD", "#fff"));
         }
         else if (type === "heavy") {
-            // For multiplayer sync, we might skip cooldown check on receiver side,
-            // but keeping it is fine as long as we don't desync.
-            // Better to force it if remote.
             if (this.cooldowns.heavy > 0 && !this.isRemotePlayer) return;
             this.cooldowns.heavy = 300; 
             this.state = "attack";
-            this.attackTimer = 50; // Long windup
+            this.attackTimer = 50; 
             this.attackType = "heavy";
             texts.push(new FloatingText(this.x, this.y-20, "CHARGING!", "#f00"));
         } 
@@ -770,22 +912,18 @@ class Entity {
         }
         else if (type === "rush") {
             if(this.cooldowns.rush > 0 && !this.isRemotePlayer) return;
-            this.cooldowns.rush = 300; // 5 seconds
+            this.cooldowns.rush = 300; 
             this.state = "rush";
             this.rushTimer = 15;
             
-            // Calculate Vector to Mouse
             let targetX, targetY;
-            
             if (this.isPlayer) {
                 targetX = mouse.x;
                 targetY = mouse.y;
             } else if (this.isRemotePlayer) {
-                // Use Synced Mouse
                 targetX = peerMouse.x;
                 targetY = peerMouse.y;
             } else {
-                // AI aims at player
                 targetX = player.x;
                 targetY = player.y;
             }
@@ -793,14 +931,10 @@ class Entity {
             const dx = targetX - (this.x + this.w/2);
             const dy = targetY - (this.y + this.h/2);
             const angle = Math.atan2(dy, dx);
-            
             this.facing = dx > 0 ? 1 : -1;
-            
-            // Rush Velocity
             const speed = 30;
             this.vx = Math.cos(angle) * speed;
             this.vy = Math.sin(angle) * speed;
-            
             texts.push(new FloatingText(this.x, this.y-40, "RUSH!", "#0ff"));
         }
     }
@@ -810,10 +944,8 @@ class Entity {
         if (this.state !== "idle" && this.state !== "run" && this.state !== "jump") return;
         const key = "a"+(index+1);
         if (this.cooldowns[key] > 0 && !this.isRemotePlayer) return;
-        
         const abilityName = this.charData.abilities[index];
         this.cooldowns[key] = 240; 
-        
         texts.push(new FloatingText(this.x, this.y-40, abilityName.toUpperCase(), "#fff"));
         executeAbility(this, abilityName);
     }
@@ -823,7 +955,6 @@ class Entity {
         let lift = -5;
         let isHeavy = false;
         
-        // Attack Data
         if (this.attackType === "light") {
             dmg = 10; kb = 5; stun = 15; range = 50; h = 40; yOffset = 20;
         } 
@@ -832,11 +963,10 @@ class Entity {
         }
         else if (this.attackType === "down_slam") {
             dmg = 18; kb = 5; lift = 15; stun = 30; range = 45; h = 60; yOffset = 30;
-            // Additional Slam Effect
             screenShake = 10;
         }
         else if (this.attackType === "heavy") {
-            if(this.attackTimer !== 5) return; // Hit only at end
+            if(this.attackTimer !== 5) return; 
             dmg = 45; kb = 25; stun = 60; range = 80; h = 70; yOffset = 20; isHeavy = true;
             screenShake = 15;
             createFireExplosion(this.x + (this.facing*50), this.y+20);
@@ -846,9 +976,6 @@ class Entity {
         }
 
         const target = this.isPlayer ? enemy : player;
-        
-        // SYNC CHANGE: Only check hitbox if I am hitting the enemy
-        // If I am the remote player (enemy ghost), I don't calculate hits, I wait for network.
         if (this.isRemotePlayer) return; 
 
         const hitX = this.facing === 1 ? this.x + this.w : this.x - range;
@@ -858,9 +985,7 @@ class Entity {
             hitY < target.y + target.h && hitY + h > target.y) {
             
             target.takeDamage(dmg, this.facing, kb, stun);
-            target.vy = lift; // Apply vertical force
-            
-            // --- SYNC SEND: WE HIT THEM ---
+            target.vy = lift; 
             if (isMultiplayer && conn) {
                 conn.send({
                     type: 'hit_confirm',
@@ -871,82 +996,62 @@ class Entity {
                     lift: lift
                 });
             }
-
-            // Visuals
             for(let i=0; i<5; i++) particles.push(new Particle(hitX, hitY, "#fff", 5, 3, 10));
         }
     }
 
     takeDamage(amount, dir, knockback, stunFrames = 0) {
-        // --- BLOCK / PARRY LOGIC ---
         if (this.state === "blocking") {
-            // Block Successful
-            this.state = "idle"; // Block breaks
-            this.cooldowns.block = 300; // Cooldown begins (5 seconds)
-            
+            this.state = "idle"; 
+            this.cooldowns.block = 300; 
             texts.push(new FloatingText(this.x, this.y - 40, "PARRY!", "#fff"));
-            
-            // Stun the attacker for 1.75 seconds (105 frames)
             if (!this.isRemotePlayer) {
                  const attacker = this.isPlayer ? enemy : player;
-                 // Apply stun to local reference of attacker
                  attacker.applyStun(105); 
-                 
-                 // If multiplayer, tell the other player they got stunned
                  if(isMultiplayer && conn) {
                      conn.send({ type: 'parry_hit', duration: 105 });
                  }
             }
-            
-            // Visual for block
             for(let i=0; i<10; i++) particles.push(new Particle(this.x+this.w/2, this.y+20, "#fff", 8, 4, 20));
             screenShake = 10;
-            return; // Damage Canceled
+            return; 
         }
 
-        // --- COUNTER LOGIC (TAUNT) ---
         if (this.counterActive) {
             texts.push(new FloatingText(this.x, this.y - 40, "COUNTER!", "#fff"));
-            this.counterActive = false; // Consume counter
-            
-            // Reflect Damage
+            this.counterActive = false; 
             if (!this.isRemotePlayer) {
                  const attacker = this.isPlayer ? enemy : player;
-                 attacker.takeDamage(amount * 1.5, -dir, 15, 40); // Knockback attacker
+                 attacker.takeDamage(amount * 1.5, -dir, 15, 40); 
                  if(isMultiplayer && conn) {
                      conn.send({ type: 'hit_confirm', dmg: amount*1.5, dir: -dir, kb: 15, stun: 40 });
                  }
             }
-            return; // Negate damage
+            return; 
         }
 
         if (this.invulnTimer > 0 || this.dead) {
              return;
         }
 
-        // --- SHIELD ABSORPTION LOGIC (Restored) ---
         if (this.shield > 0) {
             if (this.shield >= amount) {
                 this.shield -= amount;
                 texts.push(new FloatingText(this.x, this.y, "BLOCKED", "#0ff"));
-                return; // Fully absorbed
+                return; 
             } else {
                 amount -= this.shield;
                 this.shield = 0;
                 texts.push(new FloatingText(this.x, this.y, "SHIELD BREAK", "#0ff"));
-                // Continue to take remaining damage
             }
         }
 
         this.hp -= amount;
         this.invulnTimer = 15;
         this.vx = dir * knockback;
-        
-        // Stagger/Stun
         if (stunFrames > 0) {
             this.applyStun(stunFrames);
         }
-        
         screenShake = 5;
         texts.push(new FloatingText(this.x, this.y, "-" + amount, "#f00"));
         for(let i=0; i<8; i++) particles.push(new Particle(this.x+this.w/2, this.y+this.h/2, "#f00", 6, 4, 30));
@@ -966,62 +1071,38 @@ class Entity {
     }
 
     die() {
-        // If already melting or dead, don't trigger again
         if (this.dead || this.melting) return;
-
-        // Start the melt
         this.melting = true; 
         this.hp = 0;
         this.hpBar.style.display = 'none';
-        
-        // Initial blood/ink explosion
         for(let i=0; i<30; i++) particles.push(new Particle(this.x, this.y, this.color, 15, 6, 60));
-        
-        // We do NOT set this.dead = true yet. 
-        // We wait for the update() function to finish the melt animation first.
     }
 
     draw(ctx) {
         if (this.invisible) ctx.globalAlpha = 0.2;
 
-        // --- MELT RENDER ---
         if (this.melting) {
             ctx.fillStyle = this.color;
-            
-            // Calculate squash and stretch dimensions
             const currentH = this.h * this.meltTimer;
-            const currentW = this.w * (1 + (1 - this.meltTimer) * 2); // Gets 3x wider
+            const currentW = this.w * (1 + (1 - this.meltTimer) * 2); 
             const xOffset = (currentW - this.w) / 2;
-            const yOffset = this.h - currentH; // Keep feet on floor
+            const yOffset = this.h - currentH; 
 
-            // Draw the melting puddle
             ctx.beginPath();
-            // Draw a rounded rect/oval shape for the puddle
-            ctx.ellipse(
-                this.x + this.w/2, 
-                this.y + yOffset + currentH, 
-                currentW/2, 
-                currentH, 
-                0, Math.PI, 0 // Half oval
-            );
+            ctx.ellipse(this.x + this.w/2, this.y + yOffset + currentH, currentW/2, currentH, 0, Math.PI, 0);
             ctx.fill();
             
-            // Draw eyes sinking (optional detail)
             if (this.meltTimer > 0.3) {
                 ctx.fillStyle = "#000";
                 ctx.fillRect(this.x + 10, this.y + yOffset + 10, 5, 5);
                 ctx.fillRect(this.x + 25, this.y + yOffset + 10, 5, 5);
             }
-            
             ctx.globalAlpha = 1;
-            return; // Stop drawing the normal stick figure
+            return; 
         }
         
         ctx.strokeStyle = this.state === "stun" ? "#555" : this.color;
-        
-        // Counter/Block Visuals
         if (this.counterActive) ctx.strokeStyle = "#fff"; 
-        
         if (this.invulnTimer > 0 && Math.floor(Date.now()/50)%2===0) ctx.strokeStyle = "transparent";
         
         ctx.lineWidth = 4;
@@ -1029,14 +1110,9 @@ class Entity {
         const cy = this.y + 20;
 
         ctx.beginPath();
-        
-        // Head
         ctx.arc(cx, cy, 10, 0, Math.PI*2);
-        
-        // Body
         ctx.moveTo(cx, cy+10); ctx.lineTo(cx, cy+40);
         
-        // Legs (Simple animation)
         if(Math.abs(this.vx) > 1 && this.grounded) {
              ctx.moveTo(cx, cy+40); ctx.lineTo(cx-10 + Math.sin(Date.now()/100)*10, cy+70);
              ctx.moveTo(cx, cy+40); ctx.lineTo(cx+10 - Math.sin(Date.now()/100)*10, cy+70);
@@ -1045,10 +1121,8 @@ class Entity {
              ctx.moveTo(cx, cy+40); ctx.lineTo(cx+10, cy+70);
         }
 
-        // Arms - Animation Logic
         if (this.state === "attack") {
             if(this.attackType === "heavy") {
-                 // Overhead swing
                  const progress = 1 - (this.attackTimer / 50);
                  const angle = (Math.PI) * progress;
                  ctx.moveTo(cx, cy+15); 
@@ -1058,39 +1132,32 @@ class Entity {
             } else if (this.attackType === "down_slam") {
                  ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (15*this.facing), cy+40);
             } else {
-                 // Jab
                  ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (25*this.facing), cy+20);
             }
         } 
         else if (this.state === "rush") {
-            // Naruto run arms
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (20*this.facing), cy+10);
         }
         else if (this.counterActive) {
-            // Blocking pose
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (15*this.facing), cy+10);
             ctx.moveTo(cx + (15*this.facing), cy+10); ctx.lineTo(cx + (15*this.facing), cy+30);
         }
         else if (this.state === "blocking") {
-            // New Block Stance: Arms towards face
-            ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (10*this.facing), cy+5); // Hand up near face
-            ctx.moveTo(cx, cy+25); ctx.lineTo(cx + (10*this.facing), cy+10); // Other hand up near face
+            ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (10*this.facing), cy+5); 
+            ctx.moveTo(cx, cy+25); ctx.lineTo(cx + (10*this.facing), cy+10); 
         }
         else {
-            // Idle arms
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx - (10*this.facing), cy+30);
             ctx.moveTo(cx, cy+15); ctx.lineTo(cx + (10*this.facing), cy+30);
         }
         
         ctx.stroke();
 
-        // --- SHIELD RENDER RESTORED ---
         if (this.shield > 0) {
             ctx.strokeStyle = "#0ff";
             ctx.beginPath(); ctx.arc(cx, cy+20, 40, 0, Math.PI*2); ctx.stroke();
         }
         
-        // Name Tag
         ctx.font = "8px 'Press Start 2P'";
         ctx.fillStyle = "#fff";
         ctx.fillText(this.isPlayer ? "YOU" : (isMultiplayer ? "ENEMY" : "AI"), cx - 10, cy - 25);
@@ -1110,9 +1177,12 @@ function createFireExplosion(x, y) {
 function executeAbility(ent, name) {
     const dir = ent.facing;
     
-    // PROJECTILES
     if(["Ink Shot", "Fireball", "Snipe", "Trap Shot", "Arrow", "Drone Strike"].includes(name)) {
         projectiles.push(new Projectile(ent, ent.x + (dir*30), ent.y+20, dir, name));
+    }
+    else if(name === "Trap") {
+        projectiles.push(new Projectile(ent, ent.x, ent.y, 0, "Landmine"));
+        texts.push(new FloatingText(ent.x, ent.y, "MINE SET", "#f00"));
     }
     else if(name === "Piercing Arrow") {
          projectiles.push(new Projectile(ent, ent.x + (dir*30), ent.y+20, dir, "Snipe")); 
@@ -1122,8 +1192,6 @@ function executeAbility(ent, name) {
         let pUp = new Projectile(ent, ent.x, ent.y, dir, "Ink Shot"); pUp.vy = -5; projectiles.push(pUp);
         let pDown = new Projectile(ent, ent.x, ent.y, dir, "Ink Shot"); pDown.vy = 5; projectiles.push(pDown);
     }
-    
-    // DASHES / MOVEMENT
     else if(name === "Dash Strike" || name === "Flame Dash" || name === "Quick Dash") {
         ent.vx = dir * 40;
         ent.invulnTimer = 10;
@@ -1136,37 +1204,30 @@ function executeAbility(ent, name) {
     else if(name === "Shadow Step" || name === "Vanish") {
         ent.invisible = true;
         setTimeout(()=> ent.invisible=false, 2000);
-        ent.x += dir * 200; // Teleport
+        ent.x += dir * 200; 
     }
     else if(name === "Backstab") {
         const target = ent.isPlayer ? enemy : player;
-        ent.x = target.x - (target.facing * 50); // Teleport behind
+        ent.x = target.x - (target.facing * 50); 
         ent.y = target.y; 
-        ent.facing = target.facing; // Match direction to face their back
-        particles.push(new Particle(ent.x, ent.y, "#a0f", 0, 40, 20)); // Poof effect
+        ent.facing = target.facing; 
+        particles.push(new Particle(ent.x, ent.y, "#a0f", 0, 40, 20)); 
     }
-    
-    // AOE / MELEE SPECIALS
     else if(["Uppercut", "Heavy Punch", "Shield Bash"].includes(name)) {
         createFireExplosion(ent.x + (dir*40), ent.y);
-        
-        // SYNC: Only calculate AOE hits if I am the source
         if (!ent.isRemotePlayer) {
             const target = ent.isPlayer ? enemy : player;
             if(Math.abs(ent.x - target.x) < 100) {
                 target.takeDamage(30, dir, 15, 40); 
-                target.vy = -18; // Launch up
+                target.vy = -18; 
                 if(isMultiplayer && conn) conn.send({type: 'hit_confirm', dmg: 30, dir: dir, kb: 15, stun: 40, lift: -18 });
             }
         }
     }
-    // Added Wall Smash and Earthquake to AoE list
     else if(["Ink Burst", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash"].includes(name)) {
         screenShake = 15;
         createFireExplosion(ent.x, ent.y);
         for(let i=0; i<30; i++) particles.push(new Particle(ent.x, ent.y, ent.color, 20, 5, 40));
-
-        // SYNC: Only calculate AOE hits if I am the source
         if (!ent.isRemotePlayer) {
             const target = ent.isPlayer ? enemy : player;
             const dist = Math.sqrt(Math.pow(ent.x - target.x, 2) + Math.pow(ent.y - target.y, 2));
@@ -1176,10 +1237,7 @@ function executeAbility(ent, name) {
             }
         }
     }
-    
-    // SPECIAL MECHANICS
     else if(name === "Rapid Strike") {
-        // Fire bursts of short range mini hits
         let count = 0;
         let interval = setInterval(() => {
             if(count > 4) clearInterval(interval);
@@ -1187,22 +1245,18 @@ function executeAbility(ent, name) {
             count++;
         }, 80);
     }
-    
-    // UTILITY
     else if(name === "Heal Pulse") {
         ent.hp = Math.min(ent.hp + 40, ent.maxHp);
         texts.push(new FloatingText(ent.x, ent.y, "+40 HP", "#0f0"));
     }
     else if(name === "Barrier") {
-        // Restored Shield Logic
         ent.shield = 50;
         texts.push(new FloatingText(ent.x, ent.y, "BARRIER UP", "#0ff"));
     }
     else if(name === "Taunt") {
-        // Counter Stance
         ent.counterActive = true;
         texts.push(new FloatingText(ent.x, ent.y - 40, "COUNTER READY", "#fff"));
-        setTimeout(() => ent.counterActive = false, 1500); // 1.5s window
+        setTimeout(() => ent.counterActive = false, 1500); 
     }
     else if(name === "Afterimage") {
         particles.push(new Particle(ent.x, ent.y, ent.color, 0, 40, 60)); 
@@ -1213,16 +1267,41 @@ function executeAbility(ent, name) {
 // --- GAME LOOP ---
 
 function gameLoop() {
-    // 1. Clear & Shake
     ctx.save();
     if (screenShake > 0) {
         ctx.translate((Math.random()-0.5)*screenShake, (Math.random()-0.5)*screenShake);
         screenShake *= 0.9;
         if(screenShake < 1) screenShake = 0;
     }
-    ctx.fillStyle = "#1a1a1a";
-    ctx.fillRect(-10, -10, canvas.width+20, canvas.height+20);
     
+    bgSystem.update();
+    bgSystem.draw(ctx, canvas.width, canvas.height);
+    
+    // --- DRAW WALLS ---
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 0, WALL_THICKNESS, canvas.height); // Left Wall
+    ctx.fillRect(canvas.width - WALL_THICKNESS, 0, WALL_THICKNESS, canvas.height); // Right Wall
+    
+    // Wall Detailing
+    ctx.strokeStyle = "#444";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(WALL_THICKNESS, 0); ctx.lineTo(WALL_THICKNESS, canvas.height);
+    ctx.moveTo(canvas.width - WALL_THICKNESS, 0); ctx.lineTo(canvas.width - WALL_THICKNESS, canvas.height);
+    ctx.stroke();
+
+    // --- DRAW PLATFORMS ---
+    ctx.fillStyle = "#444";
+    ctx.strokeStyle = "#888";
+    platforms.forEach(p => {
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.strokeRect(p.x, p.y, p.w, p.h);
+        // "Tech" details on platforms
+        ctx.fillStyle = "#0ff";
+        ctx.fillRect(p.x + 10, p.y + 5, p.w - 20, 2);
+        ctx.fillStyle = "#444";
+    });
+
     // Floor
     ctx.strokeStyle = "#fff";
     ctx.beginPath();
@@ -1230,24 +1309,17 @@ function gameLoop() {
     ctx.lineTo(canvas.width, canvas.height-50);
     ctx.stroke();
 
-    // 2. Input Handling (Player)
     if (matchActive && !player.dead && !player.melting && player.state !== "stun" && player.state !== "dash_attack" && player.state !== "rush") {
-        // Move
         if (keys['a']) { player.vx -= MOVE_SPEED; player.facing = -1; }
         if (keys['d']) { player.vx += MOVE_SPEED; player.facing = 1; }
-        
-        // Jump
         if (keys[' '] && player.grounded) { 
             player.vy = JUMP_FORCE; player.grounded = false; 
         }
-        
-        // --- MULTIPLAYER SYNC ---
         if (isMultiplayer && conn) {
             conn.send({ type: 'input', keys: keys, mouse: mouse });
         }
     }
 
-    // 3. Updates & Draws
     [player, enemy].forEach(e => { e.update(); e.draw(ctx); });
     
     projectiles.forEach((p, i) => {
@@ -1268,8 +1340,6 @@ function gameLoop() {
     updateHUD();
     ctx.restore();
     
-    // --- SYNC UPDATE: SEND POSITION ---
-    // Every 10 frames, ensure our position is accurate on the other screen
     if (isMultiplayer && conn && matchActive && !player.dead) {
         if (!window.frameSync) window.frameSync = 0;
         window.frameSync++;
@@ -1288,10 +1358,8 @@ function gameLoop() {
 }
 
 function updateHUD() {
-    // Update Score
     document.getElementById("round-display").innerText = `ROUND ${currentRound} | YOU: ${myScore} - OPP: ${enemyScore}`;
 
-    // Update Ability Icons
     const slots = document.getElementById("abilityGrid").children;
     for(let i=0; i<4; i++) {
         const cdVal = player.cooldowns["a"+(i+1)];
@@ -1307,7 +1375,6 @@ function updateHUD() {
         }
     }
     
-    // Update Control Keys Visuals (Q, E, R, F)
     updateKeyVisual('key-q', player.cooldowns.dash, 'Q');
     updateKeyVisual('key-e', player.cooldowns.rush, 'E');
     updateKeyVisual('key-r', player.cooldowns.heavy, 'R');
@@ -1318,7 +1385,7 @@ function updateKeyVisual(id, cd, letter) {
     const el = document.getElementById(id);
     if(cd > 0) {
         el.classList.add("cooldown");
-        el.innerText = Math.ceil(cd/60); // Show seconds
+        el.innerText = Math.ceil(cd/60); 
     } else {
         el.classList.remove("cooldown");
         el.innerText = letter;
@@ -1330,41 +1397,35 @@ function updateKeyVisual(id, cd, letter) {
 function endRound(iWon) {
     if (iWon) {
         myScore++;
-        myLockedChars.push(selectedCharIndex); // Lock the winner
+        myLockedChars.push(selectedCharIndex); 
     } else {
         enemyScore++;
-        // Loser does not lock char
     }
     
     currentRound++;
     
-    // CHECK GAME OVER (Best of 3)
     if (myScore >= 2 || enemyScore >= 2) {
         const finalMsg = iWon ? "CHAMPION!" : "GAME OVER";
         document.getElementById("game-message").innerText = finalMsg;
         document.getElementById("game-message").style.color = iWon ? "#0f0" : "#f00";
-        setTimeout(() => location.reload(), 3000); // Full reset after match done
+        setTimeout(() => location.reload(), 3000); 
     } else {
-        // NEXT ROUND
         resetToMenu();
     }
 }
 
 function resetToMenu() {
-    // Reset Logic
     matchActive = false;
     entities = [];
     projectiles = [];
     particles = [];
     texts = [];
     
-    // UI Resets
     document.getElementById("gameContainer").style.display = "none";
     document.getElementById("menu").style.display = "flex";
     document.getElementById("game-message").style.display = "none";
-    document.getElementById("health-containers").innerHTML = ""; // Clear HP bars
+    document.getElementById("health-containers").innerHTML = ""; 
     
-    // Selection Reset
     selectedChar = null;
     imReady = false;
     peerReady = false;
@@ -1375,10 +1436,8 @@ function resetToMenu() {
     startBtn.style.background = "#fff";
     startBtn.style.cursor = "pointer";
     
-    // Re-render grid to show locks
     renderCharGrid();
     
-    // Net status update
     if(isMultiplayer) {
         netStatus.innerText = `ROUND ${currentRound} - SELECT FIGHTER`;
         netStatus.style.color = "#0ff";
@@ -1393,7 +1452,6 @@ function startCountdown() {
     countdownEl.innerText = `ROUND ${currentRound}`;
     countdownEl.style.color = "#fff";
     
-    // Short pause to read "ROUND X", then count down
     setTimeout(() => {
         const interval = setInterval(() => {
             if(count > 0) {
@@ -1409,7 +1467,7 @@ function startCountdown() {
             }
             count--;
         }, 1000);
-    }, 1500); // Wait 1.5s showing "ROUND X"
+    }, 1500); 
 }
 
 function startGame(remoteCharIndex) {
@@ -1419,23 +1477,31 @@ function startGame(remoteCharIndex) {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    // Init My Player
+    bgSystem.pickRandomTheme();
+
+    // --- SETUP PLATFORMS (Battlefield Layout) ---
+    platforms = [];
+    const cx = canvas.width / 2;
+    const cy = canvas.height - 50; // Floor height
+    // Top Platform
+    platforms.push({ x: cx - 60, y: cy - 250, w: 120, h: 15 });
+    // Left Platform
+    platforms.push({ x: cx - 220, y: cy - 130, w: 120, h: 15 });
+    // Right Platform
+    platforms.push({ x: cx + 100, y: cy - 130, w: 120, h: 15 });
+
     player = new Entity(200, 200, selectedChar.color, true, selectedChar);
     
-    // Init Enemy
     if(isMultiplayer) {
-        // Use the character the peer selected
         const enemyChar = CHARACTERS[remoteCharIndex];
         enemy = new Entity(canvas.width - 200, 200, enemyChar.color, false, enemyChar, true);
     } else {
-        // VS AI: Random Enemy
         const randChar = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)];
         enemy = new Entity(canvas.width - 200, 200, "#aaa", false, randChar, false);
     }
     
     entities = [player, enemy];
     
-    // Init HUD
     document.getElementById("charNameDisplay").innerText = selectedChar.name;
     document.getElementById("charNameDisplay").style.color = selectedChar.color;
     
@@ -1448,7 +1514,7 @@ function startGame(remoteCharIndex) {
         abGrid.appendChild(d);
     });
     
-    updateHUD(); // Set initial score
+    updateHUD(); 
     startCountdown();
     gameLoop();
 }
@@ -1457,28 +1523,22 @@ document.getElementById("startBtn").onclick = () => {
     if(!selectedChar) return;
     
     if (isMultiplayer) {
-        // In multiplayer, button means "Ready"
         imReady = true;
         document.getElementById("startBtn").innerText = "WAITING FOR OPPONENT...";
         document.getElementById("startBtn").style.background = "#555";
         document.getElementById("startBtn").style.cursor = "default";
         
-        // Send choice to peer
         if(conn) {
              conn.send({ type: 'selected_char', index: selectedCharIndex });
         }
         
-        // If peer already ready (received their packet earlier), start
         if(peerReady) {
             startGame(peerCharIndex);
         }
     } else {
-        // Single player - Immediate Start
         startGame(0);
     }
 };
-
-// --- EVENTS ---
 
 window.addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
@@ -1486,7 +1546,6 @@ window.addEventListener('keydown', e => {
     
     if (!player || player.dead || !matchActive) return;
     
-    // Local Actions
     if (k === 'q') { player.performAttack("dash"); if(isMultiplayer) conn.send({type:'action', action:'dash'}); }
     if (k === 'r') { player.performAttack("heavy"); if(isMultiplayer) conn.send({type:'action', action:'heavy'}); }
     if (k === 'e') { player.performAttack("rush"); if(isMultiplayer) conn.send({type:'action', action:'rush'}); }
@@ -1513,16 +1572,13 @@ window.addEventListener('mousemove', e => {
     mouse.x = e.clientX; mouse.y = e.clientY;
 });
 
-// --- MULTIPLAYER LOGIC ---
-
 if (isMultiplayer) {
     netStatus.innerText = "INITIALIZING NETWORK...";
     
-    // Init Peer
     if (role === 'host') {
-        peer = new Peer(roomID); // Host uses the exact Room ID
+        peer = new Peer(roomID); 
     } else {
-        peer = new Peer(); // Joiner gets random ID
+        peer = new Peer(); 
     }
 
     peer.on('open', (id) => {
@@ -1535,7 +1591,6 @@ if (isMultiplayer) {
                 setupConnection();
             });
         } else {
-            // Join Logic
             netStatus.innerText = "CONNECTING TO HOST...";
             conn = peer.connect(roomID);
             
@@ -1545,7 +1600,6 @@ if (isMultiplayer) {
         }
     });
     
-    // If name taken or error
     peer.on('error', (err) => {
         netStatus.innerText = "ERROR: " + err.type;
         alert("Connection Error. Room might be full or ID invalid.");
@@ -1557,7 +1611,6 @@ function setupConnection() {
     netStatus.style.color = "#0f0";
     
     conn.on('data', (data) => {
-        // 1. Character Select Handling
         if (data.type === 'selected_char') {
             peerCharIndex = data.index;
             peerReady = true;
@@ -1568,13 +1621,11 @@ function setupConnection() {
             }
         }
         
-        // 2. Input Syncing (Movement)
         if (data.type === 'input') {
             peerKeys = data.keys;
             peerMouse = data.mouse;
         }
         
-        // 3. Actions (Attacks/Abilities)
         if (data.type === 'action') {
             if(!enemy) return;
             if(data.action === 'dash') enemy.performAttack("dash");
@@ -1589,22 +1640,18 @@ function setupConnection() {
             enemy.useAbility(data.index);
         }
 
-        // 4. Hit Confirm (Take Damage if enemy says they hit us)
         if (data.type === 'hit_confirm') {
             player.takeDamage(data.dmg, data.dir, data.kb, data.stun);
             if(data.lift) player.vy = data.lift;
         }
 
-        // 5. Parry Confirm (We got parried/blocked and should be stunned)
         if (data.type === 'parry_hit') {
             player.applyStun(data.duration);
             texts.push(new FloatingText(player.x, player.y - 40, "PARRIED!", "#f00"));
         }
 
-        // 6. Position Correction (Anti-Drift)
         if (data.type === 'sync_pos') {
             if (enemy && !enemy.dead) {
-                // Smoothly correct position
                 enemy.x = enemy.x * 0.8 + data.x * 0.2;
                 enemy.y = enemy.y * 0.8 + data.y * 0.2;
                 enemy.hp = data.hp;
