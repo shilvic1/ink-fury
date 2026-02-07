@@ -142,7 +142,7 @@
     <div id="health-containers"></div>
     <div id="controls-hud">
         <div class="ctrl-row"><div class="ctrl-key">A</div><div class="ctrl-key">D</div> MOVE</div>
-        <div class="ctrl-row"><div class="ctrl-key wide">SPACE</div> JUMP</div>
+        <div class="ctrl-row"><div class="ctrl-key wide">SPACE</div> DOUBLE JUMP</div>
         <div class="ctrl-row"><div class="ctrl-key">S</div> DROP</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-q">Q</div> DASH</div>
         <div class="ctrl-row"><div class="ctrl-key" id="key-e">E</div> RUSH</div>
@@ -288,9 +288,9 @@ const mouse = { x:0, y:0, down:false };
 // Physics Constants
 const GRAVITY = 0.9; 
 const FRICTION = 0.88; 
-const JUMP_FORCE = -9.5; 
+const JUMP_FORCE = -12; // Increased slightly for better airtime
 const MOVE_SPEED = 0.8; 
-const WALL_THICKNESS = 50; // New Wall Thickness
+const WALL_THICKNESS = 50; 
 
 // --- NEW BACKGROUND SYSTEM ---
 class BackgroundSystem {
@@ -555,11 +555,9 @@ class Projectile {
         }
 
         // --- WALL COLLISION (CANCEL PROJECTILE) ---
-        // Checks if projectile hits the left or right walls
-        if (this.type !== "Landmine") { // Mines don't move, so they don't hit walls
+        if (this.type !== "Landmine") { 
             if (this.x < WALL_THICKNESS || this.x > canvas.width - WALL_THICKNESS) {
                 this.active = false;
-                // Spawn "Poof" particles at collision point
                 for(let i=0; i<8; i++) {
                      particles.push(new Particle(this.x, this.y, "#fff", 5, 5, 15));
                 }
@@ -633,7 +631,11 @@ class Entity {
         this.facing = 1; 
         
         this.grounded = false;
+        
+        // --- DOUBLE JUMP VARS ---
         this.jumps = 0;
+        this.maxJumps = 2; // Allow double jump
+
         this.isDashing = false;
         
         // Timers
@@ -717,31 +719,27 @@ class Entity {
             if(this.state !== "rush") {
                 this.vy = 0;
                 this.grounded = true;
-                this.jumps = 0;
+                this.jumps = 0; // Reset jump count
             }
         } 
 
         // 2. Floating Platforms (One-way)
-        // Only check collision if falling down (vy >= 0) AND not holding 'S' (Drop down)
         let dropDown = (this.isPlayer && keys['s']) || (isMultiplayer && this.isRemotePlayer && peerKeys['s']);
 
         if (this.vy >= 0 && !dropDown) {
             platforms.forEach(plat => {
-                // Check bounds: X overlapping platform, Y colliding with top
                 if (this.x + this.w > plat.x && this.x < plat.x + plat.w &&
-                    this.y + this.h >= plat.y && this.y + this.h <= plat.y + 25) { // 25px leeway for snap
+                    this.y + this.h >= plat.y && this.y + this.h <= plat.y + 25) { 
                     
-                    // Snap to top
                     this.y = plat.y - this.h;
                     this.vy = 0;
                     this.grounded = true;
-                    this.jumps = 0;
+                    this.jumps = 0; // Reset jump count
                 }
             });
         }
         
-        // --- WALL COLLISION (Players) ---
-        // Block player from going past walls
+        // --- WALL COLLISION ---
         if(this.x < WALL_THICKNESS) { this.x = WALL_THICKNESS; this.vx = 0; }
         if(this.x > canvas.width - WALL_THICKNESS - this.w) { this.x = canvas.width - WALL_THICKNESS - this.w; this.vx = 0; }
 
@@ -807,9 +805,7 @@ class Entity {
         if(this.state === "stun" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
         if (peerKeys['a']) { this.vx -= MOVE_SPEED; this.facing = -1; }
         if (peerKeys['d']) { this.vx += MOVE_SPEED; this.facing = 1; }
-        if (peerKeys[' '] && this.grounded) { 
-            this.vy = JUMP_FORCE; this.grounded = false; 
-        }
+        // Jump is handled via action sync now to prevent glitching
     }
 
     aiLogic() {
@@ -1312,9 +1308,8 @@ function gameLoop() {
     if (matchActive && !player.dead && !player.melting && player.state !== "stun" && player.state !== "dash_attack" && player.state !== "rush") {
         if (keys['a']) { player.vx -= MOVE_SPEED; player.facing = -1; }
         if (keys['d']) { player.vx += MOVE_SPEED; player.facing = 1; }
-        if (keys[' '] && player.grounded) { 
-            player.vy = JUMP_FORCE; player.grounded = false; 
-        }
+        // Jump is now handled in 'keydown' event for precision
+        
         if (isMultiplayer && conn) {
             conn.send({ type: 'input', keys: keys, mouse: mouse });
         }
@@ -1348,6 +1343,8 @@ function gameLoop() {
                 type: 'sync_pos',
                 x: player.x,
                 y: player.y,
+                vx: player.vx,
+                vy: player.vy,
                 hp: player.hp
             });
         }
@@ -1546,6 +1543,25 @@ window.addEventListener('keydown', e => {
     
     if (!player || player.dead || !matchActive) return;
     
+    // --- DOUBLE JUMP LOGIC ---
+    if (k === ' ') {
+        if (player.grounded) {
+            player.vy = JUMP_FORCE;
+            player.grounded = false;
+            player.jumps = 1;
+            if(isMultiplayer) conn.send({type:'action', action:'jump'});
+        } 
+        else if (player.jumps < player.maxJumps) {
+            player.vy = JUMP_FORCE;
+            player.jumps++;
+            
+            // Visual for double jump
+            for(let i=0; i<10; i++) particles.push(new Particle(player.x + 20, player.y + 60, "#fff", 2, 6, 20));
+            
+            if(isMultiplayer) conn.send({type:'action', action:'jump'});
+        }
+    }
+
     if (k === 'q') { player.performAttack("dash"); if(isMultiplayer) conn.send({type:'action', action:'dash'}); }
     if (k === 'r') { player.performAttack("heavy"); if(isMultiplayer) conn.send({type:'action', action:'heavy'}); }
     if (k === 'e') { player.performAttack("rush"); if(isMultiplayer) conn.send({type:'action', action:'rush'}); }
@@ -1572,13 +1588,26 @@ window.addEventListener('mousemove', e => {
     mouse.x = e.clientX; mouse.y = e.clientY;
 });
 
+// --- NETWORK CONFIGURATION FOR DIFFERENT WIFI ---
+// We add Google's public STUN servers to navigate through NATs/Routers
+const peerConfig = {
+    debug: 2,
+    config: {
+        'iceServers': [
+            { url: 'stun:stun.l.google.com:19302' },
+            { url: 'stun:stun1.l.google.com:19302' },
+            { url: 'stun:stun2.l.google.com:19302' },
+        ]
+    }
+};
+
 if (isMultiplayer) {
     netStatus.innerText = "INITIALIZING NETWORK...";
     
     if (role === 'host') {
-        peer = new Peer(roomID); 
+        peer = new Peer(roomID, peerConfig); 
     } else {
-        peer = new Peer(); 
+        peer = new Peer(peerConfig); 
     }
 
     peer.on('open', (id) => {
@@ -1597,12 +1626,18 @@ if (isMultiplayer) {
             conn.on('open', () => {
                 setupConnection();
             });
+            
+            conn.on('error', (err) => {
+                console.error(err);
+                netStatus.innerText = "CONNECTION FAILED - RETRY";
+            });
         }
     });
     
     peer.on('error', (err) => {
+        console.error(err);
         netStatus.innerText = "ERROR: " + err.type;
-        alert("Connection Error. Room might be full or ID invalid.");
+        alert("Connection Error. Ensure you have internet. If on corporate network, a TURN server might be needed.");
     });
 }
 
@@ -1628,6 +1663,10 @@ function setupConnection() {
         
         if (data.type === 'action') {
             if(!enemy) return;
+            if(data.action === 'jump') {
+                enemy.vy = JUMP_FORCE; // Sync Jump instantly
+                for(let i=0; i<10; i++) particles.push(new Particle(enemy.x + 20, enemy.y + 60, "#fff", 2, 6, 20));
+            }
             if(data.action === 'dash') enemy.performAttack("dash");
             if(data.action === 'rush') enemy.performAttack("rush");
             if(data.action === 'heavy') enemy.performAttack("heavy");
@@ -1652,6 +1691,7 @@ function setupConnection() {
 
         if (data.type === 'sync_pos') {
             if (enemy && !enemy.dead) {
+                // Smooth linear interpolation for position
                 enemy.x = enemy.x * 0.8 + data.x * 0.2;
                 enemy.y = enemy.y * 0.8 + data.y * 0.2;
                 enemy.hp = data.hp;
