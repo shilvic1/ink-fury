@@ -510,7 +510,9 @@ class Projectile {
         else if(type === "RapidHit") { this.vx = dir * 20; this.w = 15; this.h = 15; this.dmg = 6; this.life = 10; }
         else if(type === "Trap Shot") { this.vx = dir * 12; this.dmg = 5; this.effect = "slow"; }
         else if(type === "Landmine") { 
-            this.vx = 0; this.vy = 0; this.life = 9999; this.w=30; this.h=10; this.color="#f00"; this.dmg = 40;
+            this.vx = 0; this.vy = 0; 
+            this.life = 1200; // FIX: Mine disappears after 20 seconds (20 * 60fps)
+            this.w=30; this.h=10; this.color="#f00"; this.dmg = 40;
             this.y = owner.y + owner.h - 10;
         }
         else if(type === "Drone Strike") {
@@ -941,7 +943,12 @@ class Entity {
         const key = "a"+(index+1);
         if (this.cooldowns[key] > 0 && !this.isRemotePlayer) return;
         const abilityName = this.charData.abilities[index];
-        this.cooldowns[key] = 240; 
+        
+        // FIX: Extended Cooldown for Heal Pulse
+        let cdTime = 240;
+        if (abilityName === "Heal Pulse") cdTime = 1800; // 30 Seconds
+        this.cooldowns[key] = cdTime; 
+
         texts.push(new FloatingText(this.x, this.y-40, abilityName.toUpperCase(), "#fff"));
         executeAbility(this, abilityName);
     }
@@ -1220,7 +1227,8 @@ function executeAbility(ent, name) {
             }
         }
     }
-    else if(["Ink Burst", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash"].includes(name)) {
+    // FIX: ADDED "Power Slam" TO AOE LOGIC HERE
+    else if(["Ink Burst", "Power Slam", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash"].includes(name)) {
         screenShake = 15;
         createFireExplosion(ent.x, ent.y);
         for(let i=0; i<30; i++) particles.push(new Particle(ent.x, ent.y, ent.color, 20, 5, 40));
@@ -1364,9 +1372,17 @@ function updateHUD() {
         const overlay = slots[i].querySelector(".cooldown-overlay");
         const slotDiv = slots[i];
         
+        // FIX: VISUAL COOLDOWN FIX FOR LONG HEAL PULSE
+        // Max cooldown varies per ability, but for visual bar we normalize to the max set
+        // Since cooldowns are simple ints, we can just use percentage of whatever max was set
+        // But since we don't store max per slot, we approximate or just show remaining
+        // Given existing code structure, simple scaling works best visually
+        
         if (cdVal > 0) {
             slotDiv.classList.remove("ready");
-            overlay.style.height = (cdVal / 240 * 100) + "%";
+            // Improve visual feedback for very long cooldowns
+            let max = (player.charData.abilities[i] === "Heal Pulse") ? 1800 : 240; 
+            overlay.style.height = (cdVal / max * 100) + "%";
         } else {
             slotDiv.classList.add("ready");
             overlay.style.height = "0%";
