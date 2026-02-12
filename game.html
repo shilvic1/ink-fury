@@ -812,12 +812,30 @@ class Entity {
 
     aiLogic() {
         if(this.state === "stun" || this.state === "attack" || this.state === "dash_attack" || this.state === "rush" || this.state === "blocking") return;
+        
         const target = player;
+        
+        // --- STEALTH CHECK ---
+        // If the player is invisible, the AI cannot see them
+        if (target.invisible) {
+            // AI acts confused
+            this.vx *= 0.8;
+            if(Math.random() < 0.05) this.facing *= -1; // Look around
+            // Occasionally jump or block in panic
+            if(Math.random() < 0.01) this.vy = JUMP_FORCE;
+            else if (Math.random() < 0.01) this.performAttack("block");
+            return; // Stop tracking
+        }
+
         const dist = Math.abs(target.x - this.x);
         const yDist = target.y - this.y;
         this.facing = (target.x - this.x) > 0 ? 1 : -1;
 
-        if (dist > 250 && Math.random() < 0.02 && this.cooldowns.rush <= 0) {
+        // --- AI AGGRESSION SCALING WITH ROUNDS ---
+        let aggression = 0.02 + (currentRound * 0.01);
+        let reactSpeed = 0.05 + (currentRound * 0.02);
+
+        if (dist > 250 && Math.random() < aggression && this.cooldowns.rush <= 0) {
              this.performAttack("rush");
              return;
         }
@@ -828,28 +846,39 @@ class Entity {
              return;
         }
 
-        if (dist > 200 && this.cooldowns.dash <= 0) {
-            this.performAttack("dash");
-            return;
+        // --- ROUND PROGRESSION: REPLACE DASH (Q) WITH RUSH (E) ---
+        if (dist > 200) {
+            if (currentRound >= 2 && this.cooldowns.rush <= 0) {
+                 // Smarter AI uses Rush (E) to close gap
+                 this.performAttack("rush");
+                 return;
+            } else if (this.cooldowns.dash <= 0) {
+                 // Basic AI uses Dash (Q)
+                 this.performAttack("dash");
+                 return;
+            }
         }
 
         if (dist < 70) {
-            if (player.state === "attack" && Math.random() < 0.3) {
+            // Reaction Block
+            if (player.state === "attack" && Math.random() < (0.3 + (currentRound*0.05))) {
                 this.performAttack("block");
                 return;
             }
-            if (this.cooldowns.heavy <= 0 && Math.random() < 0.05) {
+            if (this.cooldowns.heavy <= 0 && Math.random() < reactSpeed) {
                 this.performAttack("heavy");
             } 
-            else if (Math.random() < 0.1) {
+            else if (Math.random() < (0.1 + (currentRound * 0.02))) {
                 this.performAttack("light");
             }
         } else {
             this.vx += this.facing * MOVE_SPEED;
-            if (this.grounded && Math.random() < 0.02) this.vy = JUMP_FORCE;
+            // Jump more often in later rounds
+            if (this.grounded && Math.random() < (0.02 + (currentRound * 0.01))) this.vy = JUMP_FORCE;
         }
         
-        if (Math.random() < 0.01) {
+        // Use abilities more frequently in higher rounds
+        if (Math.random() < (0.01 + (currentRound * 0.005))) {
             const r = Math.floor(Math.random()*4);
             this.useAbility(r);
         }
@@ -976,6 +1005,10 @@ class Entity {
         } 
         else if (this.attackType === "dash_hit") {
             dmg = 25; kb = 10; stun = 30; range = 60; h = 50; yOffset = 20;
+        }
+        // --- NEW BACKSTAB HITBOX ---
+        else if (this.attackType === "backstab_hit") {
+            dmg = 35; kb = 20; stun = 40; range = 60; h = 50; yOffset = 20;
         }
 
         const target = this.isPlayer ? enemy : player;
@@ -1215,6 +1248,11 @@ function executeAbility(ent, name) {
         ent.y = target.y; 
         ent.facing = target.facing; 
         particles.push(new Particle(ent.x, ent.y, "#a0f", 0, 40, 20)); 
+        // --- ADDED HIT LOGIC FOR BACKSTAB ---
+        ent.state = "attack";
+        ent.attackTimer = 15;
+        ent.attackType = "backstab_hit";
+        texts.push(new FloatingText(ent.x, ent.y-20, "BACKSTAB!", "#f00"));
     }
     else if(["Uppercut", "Heavy Punch", "Shield Bash"].includes(name)) {
         createFireExplosion(ent.x + (dir*40), ent.y);
@@ -1228,10 +1266,17 @@ function executeAbility(ent, name) {
         }
     }
     // FIX: ADDED "Power Slam" TO AOE LOGIC HERE
-    else if(["Ink Burst", "Power Slam", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash"].includes(name)) {
+    else if(["Ink Burst", "Power Slam", "Shockwave", "Ground Smash", "Inferno", "Earthquake", "Burn AoE", "Wall Smash", "Smoke Bomb"].includes(name)) {
         screenShake = 15;
         createFireExplosion(ent.x, ent.y);
         for(let i=0; i<30; i++) particles.push(new Particle(ent.x, ent.y, ent.color, 20, 5, 40));
+        
+        // Smoke Bomb adds invisibility
+        if (name === "Smoke Bomb") {
+            ent.invisible = true;
+            setTimeout(() => ent.invisible = false, 3000);
+        }
+
         if (!ent.isRemotePlayer) {
             const target = ent.isPlayer ? enemy : player;
             const dist = Math.sqrt(Math.pow(ent.x - target.x, 2) + Math.pow(ent.y - target.y, 2));
